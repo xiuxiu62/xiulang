@@ -1,0 +1,8 @@
+main :: () -> s32 {
+    print("hey")
+    print(" ")
+    print("sailor")
+    println("!")
+    println(":)")
+    return 0
+}

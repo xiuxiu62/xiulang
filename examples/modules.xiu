@@ -1,0 +1,38 @@
+mod a {
+	mod one {
+		proc :: () -> s32 { return 1 }
+	}
+}
+
+mod b {
+	mod two {
+		proc :: () -> s32 { return 2 }
+	}
+
+	mod three {
+		proc :: () -> s32 { return 3 }
+	}
+}
+
+mod c {
+	use a;
+	use b;
+
+	proc :: () -> s32 {
+		return a.one.proc() + b.two.proc()
+	}
+}
+
+mod d {
+	use a.one, b.{two, three}, c;
+
+	proc :: () -> s32 {
+		return one.proc() + two.proc() + three.proc() + c.proc()
+	}
+}
+
+use d.proc
+
+main :: () -> s32 {
+	return proc()
+}
