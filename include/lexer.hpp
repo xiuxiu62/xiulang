@@ -11,13 +11,8 @@ struct lexer {
 };
 
 bool lexer_load(struct lexer &lexer, const char *source);
-
 char lexer_peek(struct lexer const &lexer, u32 offset = 0);
 char lexer_advance(struct lexer &lexer);
 void lexer_skip_whitespace(struct lexer &lexer);
 bool lexer_is_at_end(struct lexer &lexer);
-// token lexer_scan_number(struct lexer &lexer);
-// token lexer_scan_identifier(struct lexer &lexer);
-// token lexer_scan_string(struct lexer &lexer);
-// token lexer_scan_char(struct lexer &lexer);
 token lexer_next_token(struct lexer &lexer);

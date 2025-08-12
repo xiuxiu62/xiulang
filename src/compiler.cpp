@@ -417,7 +417,7 @@ void print_indent(int indent) {
     }
 }
 
-void print_ast_node(ast_node *node, int indent) {
+static void print_ast_node(ast_node *node, int indent) {
     if (!node) {
         print_indent(indent);
         printf("(null)\n");
@@ -833,6 +833,34 @@ void print_ast_node(ast_node *node, int indent) {
         break;
     }
 
+    case ast_node_type::DECL_MODULE: {
+        ast_decl_module *module = (ast_decl_module *)node;
+        printf(" '%.*s' (%u declarations)\n", module->name_len, module->name, module->declaration_count);
+        for (u32 i = 0; i < module->declaration_count; i++) {
+            print_ast_node(module->declarations[i], indent + 1);
+        }
+        break;
+    }
+
+    case ast_node_type::DECL_USE: {
+        ast_decl_use *use_decl = (ast_decl_use *)node;
+        printf(" (%u items)\n", use_decl->item_count);
+        for (u32 i = 0; i < use_decl->item_count; i++) {
+            // TODO(xiu): Print individual use items
+            printf("  use item %u\n", i);
+        }
+        break;
+    }
+
+    case ast_node_type::EXPR_MEMBER_ACCESS: {
+        ast_expr_member_access *access = (ast_expr_member_access *)node;
+        printf(" '%.*s'\n", access->member_len, access->member);
+        print_indent(indent + 1);
+        printf("object:\n");
+        print_ast_node(access->object, indent + 2);
+        break;
+    }
+
     default:
         printf(" (printer not implemented for type %d)\n", (int)node->type);
         break;
@@ -887,6 +915,12 @@ const char *ast_node_type_to_string(ast_node_type type) {
         return "Identifier";
     case ast_node_type::TYPE_BUILTIN:
         return "BuiltinType";
+    case ast_node_type::DECL_MODULE:
+        return "ModuleDecl";
+    case ast_node_type::DECL_USE:
+        return "UseDecl";
+    case ast_node_type::EXPR_MEMBER_ACCESS:
+        return "MemberAccess";
     default:
         return "Unknown";
     }

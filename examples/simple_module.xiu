@@ -1,0 +1,9 @@
+mod test {
+    proc :: () -> s32 { return 1 }
+}
+
+use test
+
+main :: () -> s32 {
+    return test.proc()
+}

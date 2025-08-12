@@ -205,7 +205,6 @@ static ast_node *parse_translation_unit(parser &p) {
     return (ast_node *)unit;
 }
 
-// NEW: Parse declarations in the new syntax
 static ast_node *parse_declaration(parser &p) {
     // Skip leading newlines
     while (parser_match(p, token_type::NEWLINE)) {
@@ -214,6 +213,16 @@ static ast_node *parse_declaration(parser &p) {
 
     if (parser_check(p, token_type::END_OF_FILE)) {
         return nullptr;
+    }
+
+    // Check for module declarations
+    if (parser_check(p, token_type::MOD)) {
+        return parse_module_declaration(p);
+    }
+
+    // Check for use declarations
+    if (parser_check(p, token_type::USE)) {
+        return parse_use_declaration(p);
     }
 
     // Expect identifier first: name :: ...
@@ -825,60 +834,69 @@ static ast_node *parse_unary(parser &p) {
 static ast_node *parse_postfix(parser &p) {
     ast_node *expr = parse_primary(p);
 
-    // Handle procedure calls: identifier(args)
-    while (parser_check(p, token_type::LEFT_PAREN)) {
-        u32 line = p.current_token.row;
-        u32 col = p.current_token.column;
+    // Handle both function calls and member access
+    while (true) {
+        if (parser_check(p, token_type::DOT)) {
+            // Member access: obj.member
+            expr = parse_member_access(p, expr);
+            if (!expr) return nullptr;
+        } else if (parser_check(p, token_type::LEFT_PAREN)) {
+            // Function call: func(args)
+            u32 line = p.current_token.row;
+            u32 col = p.current_token.column;
 
-        parser_advance(p); // consume '('
+            parser_advance(p); // consume '('
 
-        // Parse arguments
-        ast_node **arguments = nullptr;
-        u32 argument_count = 0;
-        u32 argument_capacity = 8;
+            // Parse arguments (your existing function call code)
+            ast_node **arguments = nullptr;
+            u32 argument_count = 0;
+            u32 argument_capacity = 8;
 
-        if (!parser_check(p, token_type::RIGHT_PAREN)) {
-            arguments = (ast_node **)arena_alloc_array(*p.memory, sizeof(ast_node *), argument_capacity);
-            if (!arguments) {
-                parser_error(p, "Failed to allocate memory for arguments");
-                return nullptr;
-            }
-
-            do {
-                if (argument_count >= argument_capacity) {
-                    parser_error(p, "Too many procedure arguments");
+            if (!parser_check(p, token_type::RIGHT_PAREN)) {
+                arguments = (ast_node **)arena_alloc_array(*p.memory, sizeof(ast_node *), argument_capacity);
+                if (!arguments) {
+                    parser_error(p, "Failed to allocate memory for arguments");
                     return nullptr;
                 }
 
-                ast_node *arg = parse_expression(p);
-                if (!arg) return nullptr;
+                do {
+                    if (argument_count >= argument_capacity) {
+                        parser_error(p, "Too many procedure arguments");
+                        return nullptr;
+                    }
 
-                arguments[argument_count++] = arg;
+                    ast_node *arg = parse_expression(p);
+                    if (!arg) return nullptr;
 
-                if (parser_match(p, token_type::COMMA)) {
-                    continue;
-                } else {
-                    break;
-                }
-            } while (!parser_check(p, token_type::RIGHT_PAREN) && !parser_check(p, token_type::END_OF_FILE));
+                    arguments[argument_count++] = arg;
+
+                    if (parser_match(p, token_type::COMMA)) {
+                        continue;
+                    } else {
+                        break;
+                    }
+                } while (!parser_check(p, token_type::RIGHT_PAREN) && !parser_check(p, token_type::END_OF_FILE));
+            }
+
+            parser_consume(p, token_type::RIGHT_PAREN, "Expected ')' after procedure arguments");
+            if (p.has_error) return nullptr;
+
+            // Create procedure call node
+            ast_expr_call *call = (ast_expr_call *)arena_alloc(*p.memory, sizeof(ast_expr_call));
+            if (!call) {
+                parser_error(p, "Failed to allocate memory for procedure call");
+                return nullptr;
+            }
+
+            call->root = {.type = ast_node_type::EXPR_CALL, .row = line, .column = col};
+            call->procedure = expr;
+            call->arguments = arguments;
+            call->argument_count = argument_count;
+
+            expr = (ast_node *)call;
+        } else {
+            break;
         }
-
-        parser_consume(p, token_type::RIGHT_PAREN, "Expected ')' after procedure arguments");
-        if (p.has_error) return nullptr;
-
-        // Create procedure call node
-        ast_expr_call *call = (ast_expr_call *)arena_alloc(*p.memory, sizeof(ast_expr_call));
-        if (!call) {
-            parser_error(p, "Failed to allocate memory for procedure call");
-            return nullptr;
-        }
-
-        call->root = {.type = ast_node_type::EXPR_CALL, .row = line, .column = col};
-        call->procedure = expr;
-        call->arguments = arguments;
-        call->argument_count = argument_count;
-
-        expr = (ast_node *)call;
     }
 
     return expr;

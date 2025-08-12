@@ -19,10 +19,12 @@ static bool generate_global_variable(x86_generator &cg, ast_decl_variable *var_d
 static bool generate_literal(x86_generator &cg, ast_expr_literal *lit);
 static bool generate_identifier(x86_generator &cg, ast_expr_identifier *ident);
 static bool generate_binary_expression(x86_generator &cg, ast_expr_binary *binary);
-static bool generate_function_call(x86_generator &cg, ast_expr_call *call);
+static bool generate_procedure_call(x86_generator &cg, ast_expr_call *call);
 static bool generate_print_call(x86_generator &cg, ast_expr_call *call);
 static bool generate_println_call(x86_generator &cg, ast_expr_call *call);
 static bool generate_exit_call(x86_generator &cg, int exit_code);
+static char *generate_mangled_name(x86_generator &cg, const char **module_path, u32 path_len, const char *symbol_name,
+                                   u32 symbol_len);
 
 // =============================================================================
 // ASSEMBLY OUTPUT HELPERS
@@ -110,6 +112,61 @@ static bool generate_declaration(x86_generator &cg, ast_node *decl) {
         return true;
     }
 }
+
+// static bool generate_procedure(x86_generator &cg, ast_decl_procedure *proc) {
+//     // Determine the procedure name based on module context
+//     char *proc_name;
+
+//     if (cg.current_module_path && cg.current_module_depth > 0) {
+//         // This is a procedure inside a module - generate mangled name
+//         proc_name =
+//             generate_mangled_name(cg, cg.current_module_path, cg.current_module_depth, proc->name, proc->name_len);
+//         if (!proc_name) return false;
+//     } else {
+//         // This is a top-level procedure - use simple name
+//         proc_name = (char *)arena_alloc(*cg.memory, proc->name_len + 1);
+//         if (!proc_name) return false;
+//         strncpy(proc_name, proc->name, proc->name_len);
+//         proc_name[proc->name_len] = '\0';
+//     }
+
+//     cg.current_procedure = proc_name;
+//     cg.in_procedure = true;
+//     cg.stack_offset = 0;
+
+//     // Procedure declaration without body (forward declaration)
+//     if (!proc->body) {
+//         emit_comment(cg, "Forward declaration - no code generated");
+//         return true;
+//     }
+
+//     emit_comment(cg, "Procedure: %s", proc_name);
+
+//     // Make procedure globally visible
+//     fprintf(cg.out_file, ".global %s\n", proc_name);
+//     emit_label(cg, proc_name);
+
+//     // Procedure prologue
+//     emit_comment(cg, "Procedure prologue");
+//     emit_instruction_reg(cg, "push", reg::RBP);
+//     emit_instruction_reg_reg(cg, "mov", reg::RBP, reg::RSP);
+
+//     // Generate procedure body
+//     if (!generate_statement(cg, proc->body)) {
+//         return false;
+//     }
+
+//     // Procedure epilogue (in case there's no explicit return)
+//     emit_comment(cg, "Procedure epilogue");
+//     emit_instruction_reg_reg(cg, "mov", reg::RSP, reg::RBP);
+//     emit_instruction_reg(cg, "pop", reg::RBP);
+//     emit_instruction(cg, "ret");
+
+//     cg.in_procedure = false;
+//     cg.current_procedure = nullptr;
+
+//     return true;
+// }
 
 static bool generate_procedure(x86_generator &cg, ast_decl_procedure *proc) {
     // Procedure name from token
@@ -260,7 +317,7 @@ static bool generate_expression(x86_generator &cg, ast_node *expr) {
     switch (expr->type) {
     case ast_node_type::EXPR_CALL:
         printf("[DEBUG CODEGEN] Calling generate_function_call\n");
-        return generate_function_call(cg, (ast_expr_call *)expr);
+        return generate_procedure_call(cg, (ast_expr_call *)expr);
     case ast_node_type::EXPR_LITERAL:
         printf("[DEBUG CODEGEN] Calling generate_literal\n");
         return generate_literal(cg, (ast_expr_literal *)expr);
@@ -595,11 +652,11 @@ static bool generate_binary_expression(x86_generator &cg, ast_expr_binary *binar
     return true;
 }
 
-static bool generate_function_call(x86_generator &cg, ast_expr_call *call) {
+static bool generate_procedure_call(x86_generator &cg, ast_expr_call *call) {
     printf("[DEBUG CODEGEN] generate_function_call: call has %u arguments\n", call->argument_count);
 
-    // Check if this is a builtin function
     if (call->procedure->type == ast_node_type::EXPR_IDENTIFIER) {
+        // Regular function call: func()
         ast_expr_identifier *func_name = (ast_expr_identifier *)call->procedure;
         printf("[DEBUG CODEGEN] Function name: '%.*s' (len=%u)\n", func_name->name_len, func_name->name,
                func_name->name_len);
@@ -614,16 +671,47 @@ static bool generate_function_call(x86_generator &cg, ast_expr_call *call) {
             return generate_println_call(cg, call);
         }
 
-        printf("[DEBUG CODEGEN] Function '%.*s' not recognized as builtin\n", func_name->name_len, func_name->name);
+        // User-defined function call
+        emit_comment(cg, "Call %.*s", func_name->name_len, func_name->name);
+        fprintf(cg.out_file, "\tcall %.*s\n", func_name->name_len, func_name->name);
+        return true;
+
+    } else if (call->procedure->type == ast_node_type::EXPR_MEMBER_ACCESS) {
+        // Module function call: module.func()
+        ast_expr_member_access *member_access = (ast_expr_member_access *)call->procedure;
+        printf("[DEBUG CODEGEN] Member access call: '%.*s'\n", member_access->member_len, member_access->member);
+
+        if (member_access->is_module_access) {
+            // Check if it's a builtin function accessed through module
+            if (strncmp(member_access->member, "print", member_access->member_len) == 0 &&
+                member_access->member_len == 5) {
+                printf("[DEBUG CODEGEN] Module print call\n");
+                return generate_print_call(cg, call);
+            }
+            if (strncmp(member_access->member, "println", member_access->member_len) == 0 &&
+                member_access->member_len == 7) {
+                printf("[DEBUG CODEGEN] Module println call\n");
+                return generate_println_call(cg, call);
+            }
+
+            // For module.func(), treat as just func() for now
+            // In the future, you might want to mangle the name: module_func
+            emit_comment(cg, "Call %.*s (from module)", member_access->member_len, member_access->member);
+            fprintf(cg.out_file, "\tcall %.*s\n", member_access->member_len, member_access->member);
+            return true;
+        } else {
+            // Object method call - not yet implemented
+            emit_comment(cg, "TODO: Object method calls not yet supported");
+            return false;
+        }
     } else {
         printf("[DEBUG CODEGEN] Call procedure is not an identifier (type=%d)\n", (int)call->procedure->type);
+        emit_comment(cg, "TODO: Unknown procedure call type");
+        return false;
     }
-
-    emit_comment(cg, "TODO: User-defined function call");
-    return false;
 }
 
-bool generate_print_call(x86_generator &cg, ast_expr_call *call) {
+static bool generate_print_call(x86_generator &cg, ast_expr_call *call) {
     printf("[DEBUG CODEGEN] generate_print_call called\n");
 
     if (call->argument_count != 1) {
@@ -718,7 +806,7 @@ bool generate_print_call(x86_generator &cg, ast_expr_call *call) {
     return true;
 }
 
-bool generate_println_call(x86_generator &cg, ast_expr_call *call) {
+static bool generate_println_call(x86_generator &cg, ast_expr_call *call) {
     // Print the string first
     if (!generate_print_call(cg, call)) return false;
 
@@ -743,92 +831,34 @@ bool generate_println_call(x86_generator &cg, ast_expr_call *call) {
     return true;
 }
 
-// static bool generate_print_call(x86_generator &cg, ast_expr_call *call) {
-//     if (call->argument_count != 1) return false;
-
-//     // For now, only support string literals
-//     ast_node *arg = call->arguments[0];
-//     if (arg->type != ast_node_type::EXPR_LITERAL) return false;
-
-//     ast_expr_literal *str_literal = (ast_expr_literal *)arg;
-//     if (str_literal->type != literal_type::STRING) return false;
-
-//     fprintf(cg.out_file, "\t# print(\"%.*s\")\n", str_literal->value_len, str_literal->value);
-
-//     // Generate string constant
-//     static int string_counter = 0;
-//     fprintf(cg.out_file, "\t.section .rodata\n");
-//     fprintf(cg.out_file, ".LC%d:\n", string_counter);
-
-//     // Remove quotes from string literal and handle escape sequences
-//     const char *str_content = str_literal->value + 1; // Skip opening quote
-//     u32 content_len = str_literal->value_len - 2;     // Remove both quotes
-
-//     fprintf(cg.out_file, "\t.string \"");
-//     for (u32 i = 0; i < content_len; i++) {
-//         char c = str_content[i];
-//         if (c == '\\' && i + 1 < content_len) {
-//             // Handle escape sequences
-//             char next = str_content[i + 1];
-//             switch (next) {
-//             case 'n':
-//                 fprintf(cg.out_file, "\\n");
-//                 i++;
-//                 break;
-//             case 't':
-//                 fprintf(cg.out_file, "\\t");
-//                 i++;
-//                 break;
-//             case 'r':
-//                 fprintf(cg.out_file, "\\r");
-//                 i++;
-//                 break;
-//             case '\\':
-//                 fprintf(cg.out_file, "\\\\");
-//                 i++;
-//                 break;
-//             case '"':
-//                 fprintf(cg.out_file, "\\\"");
-//                 i++;
-//                 break;
-//             default:
-//                 fprintf(cg.out_file, "%c", c);
-//                 break;
-//             }
-//         } else {
-//             fprintf(cg.out_file, "%c", c);
-//         }
-//     }
-//     fprintf(cg.out_file, "\"\n");
-
-//     fprintf(cg.out_file, "\t.text\n");
-
-//     // Call printf - System V ABI calling convention
-//     fprintf(cg.out_file, "\tlea rdi, .LC%d[rip]\n", string_counter); // First argument in rdi
-//     fprintf(cg.out_file, "\tmov eax, 0\n");                          // No vector registers used
-//     fprintf(cg.out_file, "\tcall printf@PLT\n");
-
-//     string_counter++;
-//     return true;
-// }
-
-// static bool generate_println_call(x86_generator &cg, ast_expr_call *call) {
-//     // Same as print but add newline
-//     if (!generate_print_call(cg, call)) return false;
-
-//     // Add newline
-//     fprintf(cg.out_file, "\tmov rdi, 10\n"); // newline character
-//     fprintf(cg.out_file, "\tcall putchar@PLT\n");
-
-//     return true;
-// }
-
 static bool generate_exit_call(x86_generator &cg, int exit_code) {
     emit_comment(cg, "Exit with code %d", exit_code);
     fprintf(cg.out_file, "\tmov rax, 60\n");            // sys_exit
     fprintf(cg.out_file, "\tmov rdi, %d\n", exit_code); // exit code
     fprintf(cg.out_file, "\tsyscall\n");                // invoke system call
     return true;
+}
+
+static char *generate_mangled_name(x86_generator &cg, const char **module_path, u32 path_len, const char *symbol_name,
+                                   u32 symbol_len) {
+    // Calculate total length needed
+    u32 total_len = symbol_len;
+    for (u32 i = 0; i < path_len; i++) {
+        total_len += strlen(module_path[i]) + 1; // +1 for underscore
+    }
+
+    char *mangled = (char *)arena_alloc(*cg.memory, total_len + 1);
+    if (!mangled) return nullptr;
+
+    // Build the mangled name: module1_module2_symbol
+    mangled[0] = '\0';
+    for (u32 i = 0; i < path_len; i++) {
+        strcat(mangled, module_path[i]);
+        strcat(mangled, "_");
+    }
+    strncat(mangled, symbol_name, symbol_len);
+
+    return mangled;
 }
 
 // =============================================================================

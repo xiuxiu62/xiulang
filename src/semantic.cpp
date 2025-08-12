@@ -4,6 +4,11 @@
 #include "memory.hpp"
 #include <cstring>
 
+bool add_use_resolution(semantic_analyzer &analyzer, const char *local_name, u32 local_name_len,
+                        const char **source_path, u32 source_path_len, ast_decl_module *source_module);
+
+static bool module_system_init(semantic_analyzer &analyzer, arena &memory);
+
 bool semantic_analyzer_init(semantic_analyzer &analyzer, arena &memory) {
     analyzer.memory = &memory;
     analyzer.current_scope = nullptr;
@@ -26,6 +31,8 @@ bool semantic_analyzer_init(semantic_analyzer &analyzer, arena &memory) {
     }
     analyzer.current_scope = analyzer.global_scope;
 
+    if (!module_system_init(analyzer, memory)) return false;
+
     // Register builtin procedures
     register_builtin_procedures(analyzer);
 
@@ -46,6 +53,26 @@ bool analyze(semantic_analyzer &analyzer, ast_node *program) {
     }
 
     return analyze_translation_unit(analyzer, (ast_translation_unit *)program);
+}
+
+static bool module_system_init(semantic_analyzer &analyzer, arena &memory) {
+    analyzer.current_module = nullptr;
+    analyzer.current_module_path = nullptr;
+    analyzer.current_module = 0;
+
+    analyzer.registry.capacity = 32;
+    analyzer.registry.module_count = 0;
+    analyzer.registry.modules = (module_registry::module_entry *)arena_alloc_array(
+        memory, sizeof(module_registry::module_entry), analyzer.registry.capacity);
+    if (!analyzer.registry.modules) return false;
+
+    analyzer.current_uses.capacity = 32;
+    analyzer.current_uses.item_count = 0;
+    analyzer.current_uses.items = (use_resolution::resolved_item *)arena_alloc_array(
+        memory, sizeof(use_resolution::resolved_item), analyzer.current_uses.capacity);
+    if (!analyzer.current_uses.items) return false;
+
+    return true;
 }
 
 // =============================================================================
@@ -156,51 +183,32 @@ void pop_scope(semantic_analyzer &analyzer) {
 bool analyze_translation_unit(semantic_analyzer &analyzer, ast_translation_unit *unit) {
     info("🔍 Analyzing translation unit with %u declarations", unit->declaration_count);
 
-    // First pass: Collect all procedure and global variable declarations
+    // First pass: Register all modules and analyze their contents
     for (u32 i = 0; i < unit->declaration_count; i++) {
-        if (!analyze_declaration(analyzer, unit->declarations[i])) {
-            return false;
+        ast_node *decl = unit->declarations[i];
+        if (decl->type == ast_node_type::DECL_MODULE) {
+            if (!analyze_module_declaration(analyzer, (ast_decl_module *)decl)) {
+                return false;
+            }
         }
     }
 
-    // Second pass: Analyze procedure bodies
+    // Second pass: Process use declarations
     for (u32 i = 0; i < unit->declaration_count; i++) {
         ast_node *decl = unit->declarations[i];
-        if (decl->type == ast_node_type::DECL_PROCEDURE) {
-            ast_decl_procedure *proc = (ast_decl_procedure *)decl;
-            if (proc->body) {
-                analyzer.current_procedure = proc;
-                analyzer.expected_return_type = proc->return_type;
+        if (decl->type == ast_node_type::DECL_USE) {
+            if (!process_use_declaration(analyzer, (ast_decl_use *)decl)) {
+                return false;
+            }
+        }
+    }
 
-                push_scope(analyzer);
-
-                // Add parameters to procedure scope
-                for (u32 j = 0; j < proc->parameter_count; j++) {
-                    symbol param_symbol = {};
-                    param_symbol.name = proc->parameters[j].name;
-                    param_symbol.name_len = proc->parameters[j].name_len;
-                    param_symbol.type = symbol_type::PARAMETER;
-                    param_symbol.type_node = proc->parameters[j].param_type;
-                    param_symbol.declaration = (ast_node *)proc; // Point to procedure
-                    param_symbol.info.variable.stack_offset = analyzer.current_stack_offset;
-                    param_symbol.info.variable.is_initialized = true;
-                    param_symbol.info.variable.is_global = false;
-
-                    analyzer.current_stack_offset += 8; // Assume 8-byte parameters
-
-                    if (!symbol_table_add(analyzer, analyzer.current_scope, param_symbol)) {
-                        return false;
-                    }
-                }
-
-                bool result = analyze_statement(analyzer, proc->body);
-                pop_scope(analyzer);
-
-                analyzer.current_procedure = nullptr;
-                analyzer.expected_return_type = nullptr;
-                analyzer.current_stack_offset = 0;
-
-                if (!result) return false;
+    // Third pass: Analyze other declarations (procedures, variables)
+    for (u32 i = 0; i < unit->declaration_count; i++) {
+        ast_node *decl = unit->declarations[i];
+        if (decl->type != ast_node_type::DECL_MODULE && decl->type != ast_node_type::DECL_USE) {
+            if (!analyze_declaration(analyzer, decl)) {
+                return false;
             }
         }
     }
@@ -215,6 +223,10 @@ bool analyze_declaration(semantic_analyzer &analyzer, ast_node *decl) {
         return analyze_variable_declaration(analyzer, (ast_decl_variable *)decl);
     case ast_node_type::DECL_PROCEDURE:
         return analyze_procedure_declaration(analyzer, (ast_decl_procedure *)decl);
+    case ast_node_type::DECL_MODULE:
+        return analyze_module_declaration(analyzer, (ast_decl_module *)decl);
+    case ast_node_type::DECL_USE:
+        return process_use_declaration(analyzer, (ast_decl_use *)decl);
     default:
         semantic_error_at_node(analyzer, "Unknown declaration type", decl);
         return false;
@@ -372,6 +384,8 @@ bool analyze_expression(semantic_analyzer &analyzer, ast_node *expr) {
         return analyze_identifier_expression(analyzer, (ast_expr_identifier *)expr);
     case ast_node_type::EXPR_CALL:
         return analyze_call_expression(analyzer, (ast_expr_call *)expr);
+    case ast_node_type::EXPR_MEMBER_ACCESS:
+        return analyze_member_access_expr(analyzer, (ast_expr_member_access *)expr);
     default:
         semantic_error_at_node(analyzer, "Unknown expression type", expr);
         return false;
@@ -643,4 +657,489 @@ bool analyze_call_expression(semantic_analyzer &analyzer, ast_expr_call *call) {
     }
 
     return true;
+}
+
+#include "ast.hpp"
+#include "semantic.hpp"
+#include <cstring>
+
+// =============================================================================
+// MODULE REGISTRY MANAGEMENT
+// =============================================================================
+
+bool module_registry_init(module_registry &registry, arena &memory) {
+    registry.capacity = 32;
+    registry.module_count = 0;
+    registry.modules = (module_registry::module_entry *)arena_alloc_array(memory, sizeof(module_registry::module_entry),
+                                                                          registry.capacity);
+    return registry.modules != nullptr;
+}
+
+bool register_module(semantic_analyzer &analyzer, ast_decl_module *module, const char **parent_path, u32 parent_depth) {
+    if (analyzer.registry.module_count >= analyzer.registry.capacity) {
+        semantic_error(analyzer, "Too many modules", module->root.row, module->root.column);
+        return false;
+    }
+
+    // Create full path for this module
+    const char **full_path = append_to_path(analyzer, parent_path, parent_depth, module->name, module->name_len);
+    if (!full_path) return false;
+
+    u32 full_path_len = parent_depth + 1;
+
+    // Check for duplicate module
+    if (find_module_by_path(analyzer, full_path, full_path_len)) {
+        semantic_error_at_node(analyzer, "Module already defined", (ast_node *)module);
+        return false;
+    }
+
+    // Add to registry
+    module_registry::module_entry *entry = &analyzer.registry.modules[analyzer.registry.module_count++];
+    entry->path = full_path;
+    entry->path_len = full_path_len;
+    entry->module_ast = module;
+    entry->symbols = symbol_table_create(analyzer, nullptr);
+    entry->is_analyzed = false;
+
+    // Update module AST with hierarchy info
+    module->full_path = full_path;
+    module->path_depth = full_path_len;
+
+    return true;
+}
+
+ast_decl_module *find_module_by_path(semantic_analyzer &analyzer, const char **path, u32 path_len) {
+    for (u32 i = 0; i < analyzer.registry.module_count; i++) {
+        module_registry::module_entry *entry = &analyzer.registry.modules[i];
+        if (paths_equal(entry->path, entry->path_len, path, path_len)) {
+            return entry->module_ast;
+        }
+    }
+    return nullptr;
+}
+
+ast_decl_module *find_module_relative(semantic_analyzer &analyzer, const char **path, u32 path_len) {
+    // First try absolute path
+    ast_decl_module *module = find_module_by_path(analyzer, path, path_len);
+    if (module) return module;
+
+    // Try relative to current module
+    if (analyzer.current_module && analyzer.current_module_path) {
+        const char **full_path = (const char **)arena_alloc_array(*analyzer.memory, sizeof(const char *),
+                                                                  analyzer.current_path_depth + path_len);
+        if (!full_path) return nullptr;
+
+        // Copy current path + requested path
+        for (u32 i = 0; i < analyzer.current_path_depth; i++) {
+            full_path[i] = analyzer.current_module_path[i];
+        }
+        for (u32 i = 0; i < path_len; i++) {
+            full_path[analyzer.current_path_depth + i] = path[i];
+        }
+
+        return find_module_by_path(analyzer, full_path, analyzer.current_path_depth + path_len);
+    }
+
+    return nullptr;
+}
+
+// =============================================================================
+// MODULE ANALYSIS
+// =============================================================================
+
+bool analyze_module_declaration(semantic_analyzer &analyzer, ast_decl_module *module) {
+    // Register this module in the registry
+    if (!register_module(analyzer, module, analyzer.current_module_path, analyzer.current_path_depth)) {
+        return false;
+    }
+
+    // Enter module scope
+    enter_module_scope(analyzer, module);
+
+    // Analyze all declarations in the module
+    bool result = true;
+    for (u32 i = 0; i < module->declaration_count; i++) {
+        ast_node *decl = module->declarations[i];
+
+        switch (decl->type) {
+        case ast_node_type::DECL_MODULE:
+            // Nested module
+            if (!analyze_module_declaration(analyzer, (ast_decl_module *)decl)) {
+                result = false;
+            }
+            break;
+
+        case ast_node_type::DECL_USE:
+            // Use declaration
+            if (!process_use_declaration(analyzer, (ast_decl_use *)decl)) {
+                result = false;
+            }
+            break;
+
+        case ast_node_type::DECL_PROCEDURE:
+        case ast_node_type::DECL_VARIABLE:
+            // Regular declarations
+            if (!analyze_declaration(analyzer, decl)) {
+                result = false;
+            }
+            break;
+
+        default:
+            semantic_error_at_node(analyzer, "Invalid declaration in module", decl);
+            result = false;
+            break;
+        }
+
+        if (!result) break;
+    }
+
+    // Mark module as analyzed
+    for (u32 i = 0; i < analyzer.registry.module_count; i++) {
+        module_registry::module_entry *entry = &analyzer.registry.modules[i];
+        if (entry->module_ast == module) {
+            entry->is_analyzed = true;
+            break;
+        }
+    }
+
+    // Exit module scope
+    exit_module_scope(analyzer);
+
+    return result;
+}
+
+void enter_module_scope(semantic_analyzer &analyzer, ast_decl_module *module) {
+    // Set current module context
+    analyzer.current_module = module;
+    analyzer.current_module_path = module->full_path;
+    analyzer.current_path_depth = module->path_depth;
+
+    // Push a new symbol table scope for this module
+    push_scope(analyzer);
+}
+
+void exit_module_scope(semantic_analyzer &analyzer) {
+    // Pop symbol table scope
+    pop_scope(analyzer);
+
+    // Restore parent module context
+    if (analyzer.current_module && analyzer.current_module->parent_module) {
+        analyzer.current_module = analyzer.current_module->parent_module;
+        analyzer.current_module_path = analyzer.current_module->full_path;
+        analyzer.current_path_depth = analyzer.current_module->path_depth;
+    } else {
+        analyzer.current_module = nullptr;
+        analyzer.current_module_path = nullptr;
+        analyzer.current_path_depth = 0;
+    }
+}
+
+// =============================================================================
+// USE DECLARATION PROCESSING
+// =============================================================================
+
+bool use_resolution_init(use_resolution &resolution, arena &memory) {
+    resolution.capacity = 32;
+    resolution.item_count = 0;
+    resolution.items = (use_resolution::resolved_item *)arena_alloc_array(memory, sizeof(use_resolution::resolved_item),
+                                                                          resolution.capacity);
+    return resolution.items != nullptr;
+}
+
+bool process_use_declaration(semantic_analyzer &analyzer, ast_decl_use *use_decl) {
+    for (u32 i = 0; i < use_decl->item_count; i++) {
+        if (!resolve_use_item(analyzer, &use_decl->items[i])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool resolve_use_item(semantic_analyzer &analyzer, ast_decl_use::use_item *item) {
+    if (item->is_group) {
+        // Handle group import: a.{one, two}
+        ast_decl_module *base_module = find_module_relative(analyzer, item->path, item->path_len);
+        if (!base_module) {
+            semantic_error(analyzer, "Module not found in use declaration", 0, 0);
+            return false;
+        }
+
+        // Import each item in the group
+        for (u32 i = 0; i < item->group_count; i++) {
+            auto &group_item = item->group_items[i];
+
+            // Create path: base_path + group_item_name
+            const char **full_path =
+                append_to_path(analyzer, item->path, item->path_len, group_item.name, group_item.name_len);
+            if (!full_path) return false;
+
+            ast_decl_module *target_module = find_module_by_path(analyzer, full_path, item->path_len + 1);
+            if (!target_module) {
+                semantic_error(analyzer, "Module not found in group import", 0, 0);
+                return false;
+            }
+
+            // Add to current scope
+            if (!add_use_resolution(analyzer, group_item.name, group_item.name_len, full_path, item->path_len + 1,
+                                    target_module)) {
+                return false;
+            }
+        }
+    } else {
+        // Handle simple import: a.one
+        ast_decl_module *target_module = find_module_relative(analyzer, item->path, item->path_len);
+        if (!target_module) {
+            semantic_error(analyzer, "Module not found in use declaration", 0, 0);
+            return false;
+        }
+
+        // Determine local name (last segment of path)
+        const char *local_name = item->path[item->path_len - 1];
+        u32 local_name_len = strlen(local_name);
+
+        // Add to current scope
+        if (!add_use_resolution(analyzer, local_name, local_name_len, item->path, item->path_len, target_module)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+bool add_use_resolution(semantic_analyzer &analyzer, const char *local_name, u32 local_name_len,
+                        const char **source_path, u32 source_path_len, ast_decl_module *source_module) {
+    if (analyzer.current_uses.item_count >= analyzer.current_uses.capacity) {
+        semantic_error(analyzer, "Too many use declarations in scope", 0, 0);
+        return false;
+    }
+
+    // Check for conflicts
+    for (u32 i = 0; i < analyzer.current_uses.item_count; i++) {
+        auto &existing = analyzer.current_uses.items[i];
+        if (strlen(existing.local_name) == local_name_len &&
+            strncmp(existing.local_name, local_name, local_name_len) == 0) {
+            semantic_error(analyzer, "Name already imported in this scope", 0, 0);
+            return false;
+        }
+    }
+
+    // Add resolution
+    use_resolution::resolved_item *item = &analyzer.current_uses.items[analyzer.current_uses.item_count++];
+
+    // Copy local name
+    char *local_copy = (char *)arena_alloc(*analyzer.memory, local_name_len + 1);
+    if (!local_copy) return false;
+    strncpy(local_copy, local_name, local_name_len);
+    local_copy[local_name_len] = '\0';
+
+    item->local_name = local_copy;
+    item->local_name_len = local_name_len;
+    item->source_path = copy_path(analyzer, source_path, source_path_len);
+    item->source_path_len = source_path_len;
+    item->source_module = source_module;
+    item->resolved_symbol = nullptr; // Symbols resolved lazily
+
+    return true;
+}
+
+// =============================================================================
+// SYMBOL LOOKUP WITH MODULE SUPPORT
+// =============================================================================
+
+symbol *lookup_in_current_scope(semantic_analyzer &analyzer, const char *name, u32 name_len) {
+    return symbol_table_lookup_current_scope(analyzer.current_scope, name, name_len);
+}
+
+symbol *lookup_with_uses(semantic_analyzer &analyzer, const char *name, u32 name_len) {
+    // First check local scope
+    symbol *sym = symbol_table_lookup(analyzer.current_scope, name, name_len);
+    if (sym) return sym;
+
+    // Check use declarations
+    for (u32 i = 0; i < analyzer.current_uses.item_count; i++) {
+        auto &use_item = analyzer.current_uses.items[i];
+        if (symbol_names_equal(use_item.local_name, use_item.local_name_len, name, name_len)) {
+            // This is a module reference - return a special "module symbol"
+            // For now, we'll handle this in the expression analysis
+            return nullptr; // Signal that this is a module reference
+        }
+    }
+
+    // Check builtin procedures (temporary)
+    if (is_builtin_procedure_call(analyzer, name, name_len)) {
+        return nullptr; // Special handling for builtins
+    }
+
+    return nullptr;
+}
+
+symbol *lookup_in_module(semantic_analyzer &analyzer, ast_decl_module *module, const char *name, u32 name_len) {
+    // Find the module's symbol table
+    for (u32 i = 0; i < analyzer.registry.module_count; i++) {
+        module_registry::module_entry *entry = &analyzer.registry.modules[i];
+        if (entry->module_ast == module) {
+            return symbol_table_lookup(entry->symbols, name, name_len);
+        }
+    }
+    return nullptr;
+}
+
+// =============================================================================
+// MEMBER ACCESS ANALYSIS
+// =============================================================================
+
+bool analyze_member_access_expr(semantic_analyzer &analyzer, ast_expr_member_access *expr) {
+    // Check if this is module access first, before analyzing the object
+    if (expr->object->type == ast_node_type::EXPR_IDENTIFIER) {
+        ast_expr_identifier *ident = (ast_expr_identifier *)expr->object;
+
+        // Check if this identifier is a module from a use declaration
+        for (u32 i = 0; i < analyzer.current_uses.item_count; i++) {
+            auto &use_item = analyzer.current_uses.items[i];
+            if (symbol_names_equal(use_item.local_name, use_item.local_name_len, ident->name, ident->name_len)) {
+
+                expr->is_module_access = true;
+                expr->resolved_module = use_item.source_module;
+
+                // Verify the member exists in the target module
+                symbol *member_sym = lookup_in_module(analyzer, use_item.source_module, expr->member, expr->member_len);
+                if (!member_sym) {
+                    // Check if it's a nested module
+                    const char **member_path = append_to_path(analyzer, use_item.source_path, use_item.source_path_len,
+                                                              expr->member, expr->member_len);
+                    if (member_path) {
+                        ast_decl_module *nested_module =
+                            find_module_by_path(analyzer, member_path, use_item.source_path_len + 1);
+                        if (nested_module) {
+                            expr->resolved_module = nested_module;
+                            return true;
+                        }
+                    }
+
+                    semantic_error_at_node(analyzer, "Member not found in module", (ast_node *)expr);
+                    return false;
+                }
+
+                return true;
+            }
+        }
+    }
+
+    // If not module access, analyze the object expression normally
+    if (!analyze_expression(analyzer, expr->object)) {
+        return false;
+    }
+
+    // Handle regular object member access
+    expr->is_module_access = false;
+    expr->resolved_module = nullptr;
+
+    // TODO: Type checking for object member access
+    return true;
+}
+
+ast_decl_module *resolve_module_path(semantic_analyzer &analyzer, const char **path, u32 path_len) {
+    return find_module_relative(analyzer, path, path_len);
+}
+
+// =============================================================================
+// UTILITY FUNCTIONS
+// =============================================================================
+
+const char **append_to_path(semantic_analyzer &analyzer, const char **base_path, u32 base_len, const char *name,
+                            u32 name_len) {
+    const char **new_path = (const char **)arena_alloc_array(*analyzer.memory, sizeof(const char *), base_len + 1);
+    if (!new_path) return nullptr;
+
+    // Copy base path
+    for (u32 i = 0; i < base_len; i++) {
+        new_path[i] = base_path[i];
+    }
+
+    // Copy new name
+    char *name_copy = (char *)arena_alloc(*analyzer.memory, name_len + 1);
+    if (!name_copy) return nullptr;
+    strncpy(name_copy, name, name_len);
+    name_copy[name_len] = '\0';
+
+    new_path[base_len] = name_copy;
+    return new_path;
+}
+
+const char **copy_path(semantic_analyzer &analyzer, const char **path, u32 path_len) {
+    const char **copied = (const char **)arena_alloc_array(*analyzer.memory, sizeof(const char *), path_len);
+    if (!copied) return nullptr;
+
+    for (u32 i = 0; i < path_len; i++) {
+        u32 len = strlen(path[i]);
+        char *segment_copy = (char *)arena_alloc(*analyzer.memory, len + 1);
+        if (!segment_copy) return nullptr;
+        strcpy(segment_copy, path[i]);
+        copied[i] = segment_copy;
+    }
+
+    return copied;
+}
+
+bool paths_equal(const char **path1, u32 len1, const char **path2, u32 len2) {
+    if (len1 != len2) return false;
+
+    for (u32 i = 0; i < len1; i++) {
+        if (strcmp(path1[i], path2[i]) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+char *path_to_string(const char **path, u32 path_len) {
+    u32 total_len = 0;
+    for (u32 i = 0; i < path_len; i++) {
+        total_len += strlen(path[i]);
+        if (i < path_len - 1) total_len += 1; // for '.'
+    }
+
+    char *result = (char *)malloc(total_len + 1);
+    if (!result) return nullptr;
+
+    result[0] = '\0';
+    for (u32 i = 0; i < path_len; i++) {
+        strcat(result, path[i]);
+        if (i < path_len - 1) {
+            strcat(result, ".");
+        }
+    }
+
+    return result;
+}
+
+bool is_ancestor_module(const char **ancestor_path, u32 ancestor_len, const char **descendant_path,
+                        u32 descendant_len) {
+    if (ancestor_len >= descendant_len) return false;
+
+    for (u32 i = 0; i < ancestor_len; i++) {
+        if (strcmp(ancestor_path[i], descendant_path[i]) != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void push_module_scope(semantic_analyzer &analyzer, ast_decl_module *module) {
+    push_scope(analyzer);
+
+    // Initialize use resolution for this scope
+    if (!analyzer.current_uses.items) {
+        use_resolution_init(analyzer.current_uses, *analyzer.memory);
+    } else {
+        // Reset for new scope
+        analyzer.current_uses.item_count = 0;
+    }
+}
+
+void pop_module_scope(semantic_analyzer &analyzer) {
+    pop_scope(analyzer);
+
+    // Clear use resolution for this scope
+    analyzer.current_uses.item_count = 0;
 }

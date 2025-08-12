@@ -340,6 +340,10 @@ static token_type get_keyword_type(const char *word, u32 length) {
         {"break", token_type::BREAK},
         {"continue", token_type::CONTINUE},
 
+        // Module system keywords
+        {"mod", token_type::MOD},
+        {"use", token_type::USE},
+
         // Other keywords
         {"pub", token_type::PUB},
         {"true", token_type::TRUE},
