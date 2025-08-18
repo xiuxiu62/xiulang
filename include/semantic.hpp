@@ -1,21 +1,10 @@
 #pragma once
 
 #include "ast.hpp"
+#include "builtins.hpp"
 #include "defines.hpp"
 #include "memory.hpp"
-
-enum class builtin_procedure_type : u32 {
-    print,
-    println,
-};
-
-struct builtin_procedure {
-    const char *name;
-    builtin_procedure_type type;
-    u32 param_count;
-    ast_node **param_types;
-    ast_node *return_type;
-};
+#include "module.hpp"
 
 enum class symbol_type : u32 {
     VARIABLE,
@@ -57,37 +46,8 @@ struct symbol_table {
     u32 scope_depth = 0;
 };
 
-struct module_registry {
-    struct module_entry {
-        const char **path;
-        u32 path_len;
-        ast_decl_module *module_ast;
-        symbol_table *symbols;
-        bool is_analyzed;
-    };
-
-    module_entry *modules;
-    u32 module_count;
-    u32 capacity;
-};
-
-struct use_resolution {
-    struct resolved_item {
-        const char *local_name;
-        u32 local_name_len;
-        const char **source_path;
-        u32 source_path_len;
-        symbol *resolved_symbol;
-        ast_decl_module *source_module;
-    };
-
-    resolved_item *items;
-    u32 item_count;
-    u32 capacity;
-};
-
 struct semantic_analyzer {
-    arena *memory;
+    arena *allocator;
     symbol_table *current_scope;
     symbol_table *global_scope;
 
@@ -98,13 +58,14 @@ struct semantic_analyzer {
     ast_decl_procedure *current_procedure;
     ast_node *expected_return_type;
 
-    i32 current_stack_offset;
-    u32 scope_counter; // For generating unique scope IDs
+    // i32 current_stack_offset;
+    // u32 scope_counter; // For generating unique scope IDs
 
     builtin_procedure *builtin_procedures;
     u32 builtin_procedure_count;
 
-    module_registry registry;
+    builtin_registry builtins;
+    module_registry modules;
 
     ast_decl_module *current_module;
     const char **current_module_path;
@@ -113,15 +74,16 @@ struct semantic_analyzer {
     use_resolution current_uses;
 };
 
-bool semantic_analyzer_init(semantic_analyzer &analyzer, arena &memory);
+bool semantic_analyzer_init(semantic_analyzer &analyzer, arena &allocator);
 void semantic_analyzer_deinit(semantic_analyzer &analyzer);
 bool analyze(semantic_analyzer &analyzer, ast_node *program);
 
-void register_builtin_procedures(semantic_analyzer &analyzer);
-builtin_procedure *lookup_builtin_procedure(semantic_analyzer &analyzer, const char *name, u32 name_len);
-bool is_builtin_procedure_call(semantic_analyzer &analyzer, const char *name, u32 name_len);
+ast_node *create_builtin_type(builtin_registry &registry, builtin_type type);
+// void register_builtin_procedures(semantic_analyzer &analyzer);
+// builtin_procedure *lookup_builtin_procedure(semantic_analyzer &analyzer, const char *name, u32 name_len);
+// bool is_builtin_procedure_call(semantic_analyzer &analyzer, const char *name, u32 name_len);
 bool analyze_call_expression(semantic_analyzer &analyzer, ast_expr_call *call);
-ast_node *create_builtin_type(semantic_analyzer &analyzer, builtin_type type);
+// ast_node *create_builtin_type(semantic_analyzer &analyzer, builtin_type type);
 
 // Symbol table management
 symbol_table *symbol_table_create(semantic_analyzer &analyzer, symbol_table *parent);
@@ -130,9 +92,9 @@ bool symbol_table_add(semantic_analyzer &analyzer, symbol_table *table, const sy
 symbol *symbol_table_lookup(symbol_table *table, const char *name, u32 name_len);
 symbol *symbol_table_lookup_current_scope(symbol_table *table, const char *name, u32 name_len);
 
-// Scope management
-void push_scope(semantic_analyzer &analyzer);
-void pop_scope(semantic_analyzer &analyzer);
+// // Scope management
+// void push_scope(semantic_analyzer &analyzer);
+// void pop_scope(semantic_analyzer &analyzer);
 
 bool analyze_translation_unit(semantic_analyzer &analyzer, ast_translation_unit *unit);
 bool analyze_declaration(semantic_analyzer &analyzer, ast_node *decl);

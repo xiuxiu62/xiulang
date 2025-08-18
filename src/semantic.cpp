@@ -1,16 +1,18 @@
 #include "semantic.hpp"
 #include "ast.hpp"
+#include "collections.hpp"
 #include "logger.hpp"
 #include "memory.hpp"
+#include "module.hpp"
 #include <cstring>
 
 bool add_use_resolution(semantic_analyzer &analyzer, const char *local_name, u32 local_name_len,
                         const char **source_path, u32 source_path_len, ast_decl_module *source_module);
 
-static bool module_system_init(semantic_analyzer &analyzer, arena &memory);
+// static bool module_system_init(semantic_analyzer &analyzer, arena &memory);
 
-bool semantic_analyzer_init(semantic_analyzer &analyzer, arena &memory) {
-    analyzer.memory = &memory;
+bool semantic_analyzer_init(semantic_analyzer &analyzer, arena &allocator) {
+    analyzer.allocator = &allocator;
     analyzer.current_scope = nullptr;
     analyzer.global_scope = nullptr;
     analyzer.has_error = false;
@@ -31,10 +33,10 @@ bool semantic_analyzer_init(semantic_analyzer &analyzer, arena &memory) {
     }
     analyzer.current_scope = analyzer.global_scope;
 
-    if (!module_system_init(analyzer, memory)) return false;
+    if (!module_registry_init(analyzer.modules, allocator)) return false;
 
     // Register builtin procedures
-    register_builtin_procedures(analyzer);
+    register_builtin_procedures(analyzer.modules);
 
     return true;
 }
@@ -55,32 +57,32 @@ bool analyze(semantic_analyzer &analyzer, ast_node *program) {
     return analyze_translation_unit(analyzer, (ast_translation_unit *)program);
 }
 
-static bool module_system_init(semantic_analyzer &analyzer, arena &memory) {
-    analyzer.current_module = nullptr;
-    analyzer.current_module_path = nullptr;
-    analyzer.current_module = 0;
+// static bool module_system_init(semantic_analyzer &analyzer, arena &memory) {
+//     analyzer.current_module = nullptr;
+//     analyzer.current_module_path = nullptr;
+//     analyzer.current_module = 0;
 
-    analyzer.registry.capacity = 32;
-    analyzer.registry.module_count = 0;
-    analyzer.registry.modules = (module_registry::module_entry *)arena_alloc_array(
-        memory, sizeof(module_registry::module_entry), analyzer.registry.capacity);
-    if (!analyzer.registry.modules) return false;
+//     analyzer.registry.capacity = 32;
+//     analyzer.registry.module_count = 0;
+//     analyzer.registry.modules = (module_registry::module_entry *)arena_alloc_array(
+//         memory, sizeof(module_registry::module_entry), analyzer.registry.capacity);
+//     if (!analyzer.registry.modules) return false;
 
-    analyzer.current_uses.capacity = 32;
-    analyzer.current_uses.item_count = 0;
-    analyzer.current_uses.items = (use_resolution::resolved_item *)arena_alloc_array(
-        memory, sizeof(use_resolution::resolved_item), analyzer.current_uses.capacity);
-    if (!analyzer.current_uses.items) return false;
+//     analyzer.current_uses.capacity = 32;
+//     analyzer.current_uses.item_count = 0;
+//     analyzer.current_uses.items = (use_resolution::resolved_item *)arena_alloc_array(
+//         memory, sizeof(use_resolution::resolved_item), analyzer.current_uses.capacity);
+//     if (!analyzer.current_uses.items) return false;
 
-    return true;
-}
+//     return true;
+// }
 
 // =============================================================================
 // SYMBOL TABLE MANAGEMENT
 // =============================================================================
 
 symbol_table *symbol_table_create(semantic_analyzer &analyzer, symbol_table *parent) {
-    symbol_table *table = (symbol_table *)arena_alloc(*analyzer.memory, sizeof(symbol_table));
+    symbol_table *table = (symbol_table *)arena_alloc(*analyzer.allocator, sizeof(symbol_table));
     if (!table) return nullptr;
 
     table->symbols = nullptr;
@@ -89,7 +91,7 @@ symbol_table *symbol_table_create(semantic_analyzer &analyzer, symbol_table *par
     table->parent = parent;
     table->scope_depth = parent ? parent->scope_depth + 1 : 0;
 
-    table->symbols = (symbol *)arena_alloc_array(*analyzer.memory, sizeof(symbol), table->capacity);
+    table->symbols = (symbol *)arena_alloc_array(*analyzer.allocator, sizeof(symbol), table->capacity);
     if (!table->symbols) return nullptr;
 
     return table;
@@ -118,7 +120,7 @@ bool symbol_table_add(semantic_analyzer &analyzer, symbol_table *table, const sy
     // Resize if needed
     if (table->count >= table->capacity) {
         u32 new_capacity = table->capacity * 2;
-        symbol *new_symbols = (symbol *)arena_alloc_array(*analyzer.memory, sizeof(symbol), new_capacity);
+        symbol *new_symbols = (symbol *)arena_alloc_array(*analyzer.allocator, sizeof(symbol), new_capacity);
         if (!new_symbols) return false;
 
         // Copy existing symbols
@@ -449,7 +451,7 @@ ast_node *infer_expression_type(semantic_analyzer &analyzer, ast_node *expr) {
     switch (expr->type) {
     case ast_node_type::EXPR_LITERAL: {
         ast_expr_literal *lit = (ast_expr_literal *)expr;
-        ast_type_builtin *builtin = (ast_type_builtin *)arena_alloc(*analyzer.memory, sizeof(ast_type_builtin));
+        ast_type_builtin *builtin = (ast_type_builtin *)arena_alloc(*analyzer.allocator, sizeof(ast_type_builtin));
         if (!builtin) return nullptr;
 
         builtin->root = {.type = ast_node_type::TYPE_BUILTIN, .row = expr->row, .column = expr->column};
@@ -545,7 +547,7 @@ const char *symbol_type_to_string(symbol_type type) {
 }
 
 ast_node *create_builtin_type(semantic_analyzer &analyzer, builtin_type type) {
-    ast_type_builtin *builtin = (ast_type_builtin *)arena_alloc(*analyzer.memory, sizeof(ast_type_builtin));
+    ast_type_builtin *builtin = (ast_type_builtin *)arena_alloc(*analyzer.allocator, sizeof(ast_type_builtin));
     if (!builtin) return nullptr;
 
     builtin->root = {.type = ast_node_type::TYPE_BUILTIN, .row = 0, .column = 0};
@@ -557,7 +559,7 @@ ast_node *create_builtin_type(semantic_analyzer &analyzer, builtin_type type) {
 void register_builtin_procedures(semantic_analyzer &analyzer) {
     // Allocate space for builtin procedures
     analyzer.builtin_procedure_count = 2; // print and println
-    analyzer.builtin_procedures = (builtin_procedure *)arena_alloc_array(*analyzer.memory, sizeof(builtin_procedure),
+    analyzer.builtin_procedures = (builtin_procedure *)arena_alloc_array(*analyzer.allocator, sizeof(builtin_procedure),
                                                                          analyzer.builtin_procedure_count);
 
     if (!analyzer.builtin_procedures) return;
@@ -567,7 +569,7 @@ void register_builtin_procedures(semantic_analyzer &analyzer) {
     ast_node *void_type = create_builtin_type(analyzer, builtin_type::VOID);
 
     // Register print procedure: print(message: str) -> void
-    ast_node **print_params = (ast_node **)arena_alloc_array(*analyzer.memory, sizeof(ast_node *), 1);
+    ast_node **print_params = (ast_node **)arena_alloc_array(*analyzer.allocator, sizeof(ast_node *), 1);
     if (print_params) {
         print_params[0] = str_type;
     }
@@ -579,7 +581,7 @@ void register_builtin_procedures(semantic_analyzer &analyzer) {
                                       .return_type = void_type};
 
     // Register println procedure: println(message: str) -> void
-    ast_node **println_params = (ast_node **)arena_alloc_array(*analyzer.memory, sizeof(ast_node *), 1);
+    ast_node **println_params = (ast_node **)arena_alloc_array(*analyzer.allocator, sizeof(ast_node *), 1);
     if (println_params) {
         println_params[0] = str_type;
     }
@@ -667,81 +669,83 @@ bool analyze_call_expression(semantic_analyzer &analyzer, ast_expr_call *call) {
 // MODULE REGISTRY MANAGEMENT
 // =============================================================================
 
-bool module_registry_init(module_registry &registry, arena &memory) {
-    registry.capacity = 32;
-    registry.module_count = 0;
-    registry.modules = (module_registry::module_entry *)arena_alloc_array(memory, sizeof(module_registry::module_entry),
-                                                                          registry.capacity);
-    return registry.modules != nullptr;
-}
+// bool module_registry_init(module_registry &registry, arena &allocator) {
+//     registry.capacity = 32;
+//     registry.module_count = 0;
+//     registry.modules = (module_registry::module_entry *)arena_alloc_array(memory,
+//     sizeof(module_registry::module_entry),
+//                                                                           registry.capacity);
+//     return registry.modules != nullptr;
+// }
 
-bool register_module(semantic_analyzer &analyzer, ast_decl_module *module, const char **parent_path, u32 parent_depth) {
-    if (analyzer.registry.module_count >= analyzer.registry.capacity) {
-        semantic_error(analyzer, "Too many modules", module->root.row, module->root.column);
-        return false;
-    }
+// bool register_module(semantic_analyzer &analyzer, ast_decl_module *module, const char **parent_path, u32
+// parent_depth) {
+//     if (analyzer.modules.module_count >= analyzer.modules.capacity) {
+//         semantic_error(analyzer, "Too many modules", module->root.row, module->root.column);
+//         return false;
+//     }
 
-    // Create full path for this module
-    const char **full_path = append_to_path(analyzer, parent_path, parent_depth, module->name, module->name_len);
-    if (!full_path) return false;
+//     // Create full path for this module
+//     const char **full_path = append_to_path(analyzer, parent_path, parent_depth, module->name, module->name_len);
+//     if (!full_path) return false;
 
-    u32 full_path_len = parent_depth + 1;
+//     u32 full_path_len = parent_depth + 1;
 
-    // Check for duplicate module
-    if (find_module_by_path(analyzer, full_path, full_path_len)) {
-        semantic_error_at_node(analyzer, "Module already defined", (ast_node *)module);
-        return false;
-    }
+//     // Check for duplicate module
+//     if (find_module_by_path(analyzer, full_path, full_path_len)) {
+//         semantic_error_at_node(analyzer, "Module already defined", (ast_node *)module);
+//         return false;
+//     }
 
-    // Add to registry
-    module_registry::module_entry *entry = &analyzer.registry.modules[analyzer.registry.module_count++];
-    entry->path = full_path;
-    entry->path_len = full_path_len;
-    entry->module_ast = module;
-    entry->symbols = symbol_table_create(analyzer, nullptr);
-    entry->is_analyzed = false;
+//     // Add to registry
+//     module_registry::module_entry *entry = &analyzer.registry.modules[analyzer.registry.module_count++];
+//     entry->path = full_path;
+//     entry->path_len = full_path_len;
+//     entry->module_ast = module;
+//     entry->symbols = symbol_table_create(analyzer, nullptr);
+//     entry->is_analyzed = false;
 
-    // Update module AST with hierarchy info
-    module->full_path = full_path;
-    module->path_depth = full_path_len;
+//     // Update module AST with hierarchy info
+//     module->full_path = full_path;
+//     module->path_depth = full_path_len;
 
-    return true;
-}
+//     return true;
+// }
 
-ast_decl_module *find_module_by_path(semantic_analyzer &analyzer, const char **path, u32 path_len) {
-    for (u32 i = 0; i < analyzer.registry.module_count; i++) {
-        module_registry::module_entry *entry = &analyzer.registry.modules[i];
-        if (paths_equal(entry->path, entry->path_len, path, path_len)) {
-            return entry->module_ast;
-        }
-    }
-    return nullptr;
-}
+// ast_decl_module *find_module_by_path(semantic_analyzer &analyzer, const char **path, u32 path_len) {
+//     for (u32 i = 0; i < analyzer.modules.module_count; i++) {
+//         module_registry::module_entry *entry = &analyzer.registry.modules[i];
+//         if (paths_equal(entry->path, entry->path_len, path, path_len)) {
+//             return entry->module_ast;
+//         }
+//     }
+//     return nullptr;
+// }
 
-ast_decl_module *find_module_relative(semantic_analyzer &analyzer, const char **path, u32 path_len) {
-    // First try absolute path
-    ast_decl_module *module = find_module_by_path(analyzer, path, path_len);
-    if (module) return module;
+// ast_decl_module *find_module_relative(semantic_analyzer &analyzer, const char **path, u32 path_len) {
+//     // First try absolute path
+//     ast_decl_module *module = find_module_by_path(analyzer, path, path_len);
+//     if (module) return module;
 
-    // Try relative to current module
-    if (analyzer.current_module && analyzer.current_module_path) {
-        const char **full_path = (const char **)arena_alloc_array(*analyzer.memory, sizeof(const char *),
-                                                                  analyzer.current_path_depth + path_len);
-        if (!full_path) return nullptr;
+//     // Try relative to current module
+//     if (analyzer.current_module && analyzer.current_module_path) {
+//         const char **full_path = (const char **)arena_alloc_array(*analyzer.allocator, sizeof(const char *),
+//                                                                   analyzer.current_path_depth + path_len);
+//         if (!full_path) return nullptr;
 
-        // Copy current path + requested path
-        for (u32 i = 0; i < analyzer.current_path_depth; i++) {
-            full_path[i] = analyzer.current_module_path[i];
-        }
-        for (u32 i = 0; i < path_len; i++) {
-            full_path[analyzer.current_path_depth + i] = path[i];
-        }
+//         // Copy current path + requested path
+//         for (u32 i = 0; i < analyzer.current_path_depth; i++) {
+//             full_path[i] = analyzer.current_module_path[i];
+//         }
+//         for (u32 i = 0; i < path_len; i++) {
+//             full_path[analyzer.current_path_depth + i] = path[i];
+//         }
 
-        return find_module_by_path(analyzer, full_path, analyzer.current_path_depth + path_len);
-    }
+//         return find_module_by_path(analyzer, full_path, analyzer.current_path_depth + path_len);
+//     }
 
-    return nullptr;
-}
+//     return nullptr;
+// }
 
 // =============================================================================
 // MODULE ANALYSIS
@@ -794,9 +798,9 @@ bool analyze_module_declaration(semantic_analyzer &analyzer, ast_decl_module *mo
     }
 
     // Mark module as analyzed
-    for (u32 i = 0; i < analyzer.registry.module_count; i++) {
-        module_registry::module_entry *entry = &analyzer.registry.modules[i];
-        if (entry->module_ast == module) {
+    for (u32 i = 0; i < module_count(analyzer.modules); i++) {
+        module_info *entry = get_module(analyzer.modules, {i});
+        if (entry->ast_node == module) {
             entry->is_analyzed = true;
             break;
         }
@@ -927,7 +931,7 @@ bool add_use_resolution(semantic_analyzer &analyzer, const char *local_name, u32
     use_resolution::resolved_item *item = &analyzer.current_uses.items[analyzer.current_uses.item_count++];
 
     // Copy local name
-    char *local_copy = (char *)arena_alloc(*analyzer.memory, local_name_len + 1);
+    char *local_copy = (char *)arena_alloc(*analyzer.allocator, local_name_len + 1);
     if (!local_copy) return false;
     strncpy(local_copy, local_name, local_name_len);
     local_copy[local_name_len] = '\0';
@@ -975,7 +979,7 @@ symbol *lookup_with_uses(semantic_analyzer &analyzer, const char *name, u32 name
 
 symbol *lookup_in_module(semantic_analyzer &analyzer, ast_decl_module *module, const char *name, u32 name_len) {
     // Find the module's symbol table
-    for (u32 i = 0; i < analyzer.registry.module_count; i++) {
+    for (u32 i = 0; i < analyzer.modules.module_count; i++) {
         module_registry::module_entry *entry = &analyzer.registry.modules[i];
         if (entry->module_ast == module) {
             return symbol_table_lookup(entry->symbols, name, name_len);
@@ -1048,7 +1052,7 @@ ast_decl_module *resolve_module_path(semantic_analyzer &analyzer, const char **p
 
 const char **append_to_path(semantic_analyzer &analyzer, const char **base_path, u32 base_len, const char *name,
                             u32 name_len) {
-    const char **new_path = (const char **)arena_alloc_array(*analyzer.memory, sizeof(const char *), base_len + 1);
+    const char **new_path = (const char **)arena_alloc_array(*analyzer.allocator, sizeof(const char *), base_len + 1);
     if (!new_path) return nullptr;
 
     // Copy base path
@@ -1057,7 +1061,7 @@ const char **append_to_path(semantic_analyzer &analyzer, const char **base_path,
     }
 
     // Copy new name
-    char *name_copy = (char *)arena_alloc(*analyzer.memory, name_len + 1);
+    char *name_copy = (char *)arena_alloc(*analyzer.allocator, name_len + 1);
     if (!name_copy) return nullptr;
     strncpy(name_copy, name, name_len);
     name_copy[name_len] = '\0';
@@ -1067,12 +1071,12 @@ const char **append_to_path(semantic_analyzer &analyzer, const char **base_path,
 }
 
 const char **copy_path(semantic_analyzer &analyzer, const char **path, u32 path_len) {
-    const char **copied = (const char **)arena_alloc_array(*analyzer.memory, sizeof(const char *), path_len);
+    const char **copied = (const char **)arena_alloc_array(*analyzer.allocator, sizeof(const char *), path_len);
     if (!copied) return nullptr;
 
     for (u32 i = 0; i < path_len; i++) {
         u32 len = strlen(path[i]);
-        char *segment_copy = (char *)arena_alloc(*analyzer.memory, len + 1);
+        char *segment_copy = (char *)arena_alloc(*analyzer.allocator, len + 1);
         if (!segment_copy) return nullptr;
         strcpy(segment_copy, path[i]);
         copied[i] = segment_copy;
@@ -1130,7 +1134,7 @@ void push_module_scope(semantic_analyzer &analyzer, ast_decl_module *module) {
 
     // Initialize use resolution for this scope
     if (!analyzer.current_uses.items) {
-        use_resolution_init(analyzer.current_uses, *analyzer.memory);
+        use_resolution_init(analyzer.current_uses, *analyzer.allocator);
     } else {
         // Reset for new scope
         analyzer.current_uses.item_count = 0;

@@ -17,11 +17,11 @@ struct pool_handle {
         return index != other.index;
     }
 
-    constexpr bool is_valid() {
+    constexpr bool is_valid() const {
         return *this == pool_handle::invalid();
     }
 
-    constexpr bool is_invalid() {
+    constexpr bool is_invalid() const {
         return *this == pool_handle::invalid();
     }
 };

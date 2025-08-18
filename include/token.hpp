@@ -35,6 +35,7 @@ enum class token_type : u32 {
     RETURN,
     BREAK,
     CONTINUE,
+    DEFER,
 
     // Keywords - Module system
     MOD,

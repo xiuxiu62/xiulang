@@ -339,6 +339,7 @@ static token_type get_keyword_type(const char *word, u32 length) {
         {"return", token_type::RETURN},
         {"break", token_type::BREAK},
         {"continue", token_type::CONTINUE},
+        {"defer", token_type::DEFER},
 
         // Module system keywords
         {"mod", token_type::MOD},

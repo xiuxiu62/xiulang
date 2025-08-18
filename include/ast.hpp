@@ -28,6 +28,7 @@ enum class ast_node_type : u32 {
     STMT_DEFAULT = 40,
     STMT_GOTO = 41,
     STMT_LABEL = 42,
+    STMT_DEFER = 43,
 
     DECL_VARIABLE = 60,
     DECL_PROCEDURE = 61,
@@ -267,6 +268,11 @@ struct ast_stmt_break {
 
 struct ast_stmt_continue {
     ast_node root;
+};
+
+struct ast_stmt_defer {
+    ast_node root;
+    ast_node *action;
 };
 
 struct ast_stmt_switch {

@@ -58,11 +58,17 @@ struct use_resolution {
 
 struct module_registry {
     pool<module_info> modules;
-    arena *loose_memory;
+    arena *allocator;
+
+    u32 count() const;
 };
 
-bool module_registry_init(module_registry &registry, arena &memory);
+bool module_registry_init(module_registry &registry, arena &allocator);
 void module_registry_deinit(module_registry &registry);
+
+u32 module_count(const module_registry &registry);
+module_info *get_module(module_registry &registry, pool_handle handle);
 pool_handle register_module(module_registry &registry, ast_decl_module *module_ast, pool_handle parent);
-module_info *find_module_by_path(module_registry &registry, const char **path, u32 path_len);
-module_info *find_nested_module(module_registry &registry, module_info *parent, const char *name, u32 name_len);
+
+pool_handle find_module_by_path(module_registry &registry, const char **path, u32 path_len);
+pool_handle find_nested_module(module_registry &registry, pool_handle parent, const char *name, u32 name_len);

@@ -217,8 +217,6 @@ static bool generate_procedure(x86_generator &cg, ast_decl_procedure *proc) {
 static bool generate_statement(x86_generator &cg, ast_node *stmt) {
     if (!stmt) return true;
 
-    printf("[DEBUG CODEGEN] generate_statement: type = %d\n", (int)stmt->type);
-
     switch (stmt->type) {
     case ast_node_type::STMT_COMPOUND: {
         ast_stmt_compound *compound = (ast_stmt_compound *)stmt;
@@ -256,7 +254,6 @@ static bool generate_statement(x86_generator &cg, ast_node *stmt) {
 
     case ast_node_type::STMT_EXPRESSION: {
         ast_stmt_expression *expr_stmt = (ast_stmt_expression *)stmt;
-        printf("[DEBUG CODEGEN] Expression statement - calling generate_expression\n");
         emit_comment(cg, "Expression statement");
         return generate_expression(cg, expr_stmt->expression);
     }
@@ -304,31 +301,19 @@ static bool generate_statement(x86_generator &cg, ast_node *stmt) {
 
 static bool generate_expression(x86_generator &cg, ast_node *expr) {
     if (!expr) {
-        printf("[DEBUG CODEGEN] generate_expression: expr is null\n");
         return false;
     }
 
-    printf("[DEBUG CODEGEN] generate_expression: type = %d (%s)\n", (int)expr->type,
-           expr->type == ast_node_type::EXPR_CALL         ? "EXPR_CALL"
-           : expr->type == ast_node_type::EXPR_LITERAL    ? "EXPR_LITERAL"
-           : expr->type == ast_node_type::EXPR_IDENTIFIER ? "EXPR_IDENTIFIER"
-                                                          : "OTHER");
-
     switch (expr->type) {
     case ast_node_type::EXPR_CALL:
-        printf("[DEBUG CODEGEN] Calling generate_function_call\n");
         return generate_procedure_call(cg, (ast_expr_call *)expr);
     case ast_node_type::EXPR_LITERAL:
-        printf("[DEBUG CODEGEN] Calling generate_literal\n");
         return generate_literal(cg, (ast_expr_literal *)expr);
     case ast_node_type::EXPR_IDENTIFIER:
-        printf("[DEBUG CODEGEN] Calling generate_identifier\n");
         return generate_identifier(cg, (ast_expr_identifier *)expr);
     case ast_node_type::EXPR_BINARY:
-        printf("[DEBUG CODEGEN] Calling generate_binary_expression\n");
         return generate_binary_expression(cg, (ast_expr_binary *)expr);
     default:
-        printf("[DEBUG CODEGEN] Unknown expression type: %d\n", (int)expr->type);
         return false;
     }
 }
@@ -653,21 +638,16 @@ static bool generate_binary_expression(x86_generator &cg, ast_expr_binary *binar
 }
 
 static bool generate_procedure_call(x86_generator &cg, ast_expr_call *call) {
-    printf("[DEBUG CODEGEN] generate_function_call: call has %u arguments\n", call->argument_count);
 
     if (call->procedure->type == ast_node_type::EXPR_IDENTIFIER) {
         // Regular function call: func()
         ast_expr_identifier *func_name = (ast_expr_identifier *)call->procedure;
-        printf("[DEBUG CODEGEN] Function name: '%.*s' (len=%u)\n", func_name->name_len, func_name->name,
-               func_name->name_len);
 
         // Check for builtin functions
         if (strncmp(func_name->name, "print", func_name->name_len) == 0 && func_name->name_len == 5) {
-            printf("[DEBUG CODEGEN] Calling generate_print_call\n");
             return generate_print_call(cg, call);
         }
         if (strncmp(func_name->name, "println", func_name->name_len) == 0 && func_name->name_len == 7) {
-            printf("[DEBUG CODEGEN] Calling generate_println_call\n");
             return generate_println_call(cg, call);
         }
 
@@ -679,18 +659,15 @@ static bool generate_procedure_call(x86_generator &cg, ast_expr_call *call) {
     } else if (call->procedure->type == ast_node_type::EXPR_MEMBER_ACCESS) {
         // Module function call: module.func()
         ast_expr_member_access *member_access = (ast_expr_member_access *)call->procedure;
-        printf("[DEBUG CODEGEN] Member access call: '%.*s'\n", member_access->member_len, member_access->member);
 
         if (member_access->is_module_access) {
             // Check if it's a builtin function accessed through module
             if (strncmp(member_access->member, "print", member_access->member_len) == 0 &&
                 member_access->member_len == 5) {
-                printf("[DEBUG CODEGEN] Module print call\n");
                 return generate_print_call(cg, call);
             }
             if (strncmp(member_access->member, "println", member_access->member_len) == 0 &&
                 member_access->member_len == 7) {
-                printf("[DEBUG CODEGEN] Module println call\n");
                 return generate_println_call(cg, call);
             }
 
@@ -705,34 +682,20 @@ static bool generate_procedure_call(x86_generator &cg, ast_expr_call *call) {
             return false;
         }
     } else {
-        printf("[DEBUG CODEGEN] Call procedure is not an identifier (type=%d)\n", (int)call->procedure->type);
         emit_comment(cg, "TODO: Unknown procedure call type");
         return false;
     }
 }
 
 static bool generate_print_call(x86_generator &cg, ast_expr_call *call) {
-    printf("[DEBUG CODEGEN] generate_print_call called\n");
-
-    if (call->argument_count != 1) {
-        printf("[DEBUG CODEGEN] print call has wrong number of arguments: %u\n", call->argument_count);
-        return false;
-    }
+    if (call->argument_count != 1) return false;
 
     // For now, only support string literals
     ast_node *arg = call->arguments[0];
-    if (arg->type != ast_node_type::EXPR_LITERAL) {
-        printf("[DEBUG CODEGEN] print argument is not a literal (type=%d)\n", (int)arg->type);
-        return false;
-    }
+    if (arg->type != ast_node_type::EXPR_LITERAL) return false;
 
     ast_expr_literal *str_literal = (ast_expr_literal *)arg;
-    if (str_literal->type != literal_type::STRING) {
-        printf("[DEBUG CODEGEN] print literal is not a string (type=%d)\n", (int)str_literal->type);
-        return false;
-    }
-
-    printf("[DEBUG CODEGEN] Generating syscall for string: '%.*s'\n", str_literal->value_len, str_literal->value);
+    if (str_literal->type != literal_type::STRING) return false;
 
     emit_comment(cg, "print(\"%.*s\") - using write syscall", str_literal->value_len, str_literal->value);
 
