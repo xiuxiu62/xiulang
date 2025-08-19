@@ -1,45 +1,44 @@
-#include "x86_generator.hpp"
 #include "ast.hpp"
 #include "defines.hpp"
+#include "generator.hpp"
 #include "memory.hpp"
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 
-// =============================================================================
-// CODE GENERATION ENTRY POINTS
-// =============================================================================
+static bool generate_declaration(x86_linux_generator &cg, ast_node *decl);
+static bool generate_procedure(x86_linux_generator &cg, ast_decl_procedure *proc);
+static bool generate_statement(x86_linux_generator &cg, ast_node *stmt);
+static bool generate_expression(x86_linux_generator &cg, ast_node *expr);
+static bool generate_global_variable(x86_linux_generator &cg, ast_decl_variable *var_decl);
+static bool generate_literal(x86_linux_generator &cg, ast_expr_literal *lit);
+static bool generate_identifier(x86_linux_generator &cg, ast_expr_identifier *ident);
+static bool generate_binary_expression(x86_linux_generator &cg, ast_expr_binary *binary);
+static bool generate_function_call(x86_linux_generator &cg, ast_expr_call *call);
+static bool generate_print_call(x86_linux_generator &cg, ast_expr_call *call);
+static bool generate_println_call(x86_linux_generator &cg, ast_expr_call *call);
+static bool generate_exit_call(x86_linux_generator &cg, int exit_code);
 
-static bool generate_declaration(x86_generator &cg, ast_node *decl);
-static bool generate_procedure(x86_generator &cg, ast_decl_procedure *proc);
-static bool generate_statement(x86_generator &cg, ast_node *stmt);
-static bool generate_expression(x86_generator &cg, ast_node *expr);
-static bool generate_global_variable(x86_generator &cg, ast_decl_variable *var_decl);
-static bool generate_literal(x86_generator &cg, ast_expr_literal *lit);
-static bool generate_identifier(x86_generator &cg, ast_expr_identifier *ident);
-static bool generate_binary_expression(x86_generator &cg, ast_expr_binary *binary);
-static bool generate_function_call(x86_generator &cg, ast_expr_call *call);
-static bool generate_print_call(x86_generator &cg, ast_expr_call *call);
-static bool generate_println_call(x86_generator &cg, ast_expr_call *call);
-static bool generate_exit_call(x86_generator &cg, int exit_code);
+static void emit_comment(x86_linux_generator &cg, const char *comment, ...);
+static void emit_label(x86_linux_generator &cg, const char *label);
+static void emit_directive(x86_linux_generator &cg, const char *directive);
+static void emit_instruction(x86_linux_generator &cg, const char *instr);
+static void emit_instruction_reg(x86_linux_generator &cg, const char *instr, x86_linux_register r);
+static void emit_instruction_reg_reg(x86_linux_generator &cg, const char *instr, x86_linux_register dst,
+                                     x86_linux_register src);
+static void emit_instruction_reg_imm(x86_linux_generator &cg, const char *instr, x86_linux_register r, i32 imm);
+static void emit_instruction_reg_mem(x86_linux_generator &cg, const char *instr, x86_linux_register r,
+                                     x86_linux_register base, i32 offset);
 
-// =============================================================================
-// ASSEMBLY OUTPUT HELPERS
-// =============================================================================
-
-// Register name helpers
-static const char *reg_name_64(reg r);
-static const char *reg_name_32(reg r);
-
-static char *generate_label(x86_generator &cg, const char *prefix);
-
+static const char *reg_name_64(x86_linux_register r);
+static const char *reg_name_32(x86_linux_register r);
+static char *generate_label(x86_linux_generator &cg, const char *prefix);
 static const char *builtin_type_size_suffix(builtin_type type);
-static const char *reg_name_for_type(reg r, builtin_type type);
-
+static const char *reg_name_for_type(x86_linux_register r, builtin_type type);
 extern const char *binary_op_to_string(binary_op op);
 
-bool x86_gen_init(x86_generator &cg, arena &memory, FILE *out_file) {
+bool x86_linux_generator_init(x86_linux_generator &cg, arena &memory, FILE *out_file) {
     cg.memory = &memory;
     cg.out_file = out_file;
     cg.stack_offset = 0;
@@ -50,11 +49,11 @@ bool x86_gen_init(x86_generator &cg, arena &memory, FILE *out_file) {
     return true;
 }
 
-void x86_gen_deinit(x86_generator &cg) {
+void x86_linux_generator_deinit(x86_linux_generator &cg) {
     cg = {};
 }
 
-bool generate_x86(x86_generator &cg, ast_node *program) {
+bool x86_linux_generate_asm(x86_linux_generator &cg, ast_node *program) {
     if (!program || program->type != ast_node_type::TRANSLATION_UNIT) {
         return false;
     }
@@ -92,7 +91,7 @@ bool generate_x86(x86_generator &cg, ast_node *program) {
     return true;
 }
 
-static bool generate_declaration(x86_generator &cg, ast_node *decl) {
+static bool generate_declaration(x86_linux_generator &cg, ast_node *decl) {
     switch (decl->type) {
     case ast_node_type::DECL_PROCEDURE: {
         ast_decl_procedure *proc = (ast_decl_procedure *)decl;
@@ -111,7 +110,7 @@ static bool generate_declaration(x86_generator &cg, ast_node *decl) {
     }
 }
 
-static bool generate_procedure(x86_generator &cg, ast_decl_procedure *proc) {
+static bool generate_procedure(x86_linux_generator &cg, ast_decl_procedure *proc) {
     // Procedure name from token
     char proc_name[256];
     snprintf(proc_name, sizeof(proc_name), "%.*s", proc->name_len, proc->name);
@@ -134,8 +133,8 @@ static bool generate_procedure(x86_generator &cg, ast_decl_procedure *proc) {
 
     // Procedure prologue
     emit_comment(cg, "Procedure prologue");
-    emit_instruction_reg(cg, "push", reg::RBP);              // Save old base pointer
-    emit_instruction_reg_reg(cg, "mov", reg::RBP, reg::RSP); // Set up new base pointer
+    emit_instruction_reg(cg, "push", x86_linux_register::RBP);                             // Save old base pointer
+    emit_instruction_reg_reg(cg, "mov", x86_linux_register::RBP, x86_linux_register::RSP); // Set up new base pointer
 
     // TODO: Allocate space for local variables
     // emit_instruction_reg_imm(cg, "sub", reg::RSP, local_var_space);
@@ -147,9 +146,9 @@ static bool generate_procedure(x86_generator &cg, ast_decl_procedure *proc) {
 
     // Procedure epilogue (in case there's no explicit return)
     emit_comment(cg, "Procedure epilogue");
-    emit_instruction_reg_reg(cg, "mov", reg::RSP, reg::RBP); // Restore stack pointer
-    emit_instruction_reg(cg, "pop", reg::RBP);               // Restore base pointer
-    emit_instruction(cg, "ret");                             // Return
+    emit_instruction_reg_reg(cg, "mov", x86_linux_register::RSP, x86_linux_register::RBP); // Restore stack pointer
+    emit_instruction_reg(cg, "pop", x86_linux_register::RBP);                              // Restore base pointer
+    emit_instruction(cg, "ret");                                                           // Return
 
     cg.in_procedure = false;
     cg.current_procedure = nullptr;
@@ -157,10 +156,8 @@ static bool generate_procedure(x86_generator &cg, ast_decl_procedure *proc) {
     return true;
 }
 
-static bool generate_statement(x86_generator &cg, ast_node *stmt) {
+static bool generate_statement(x86_linux_generator &cg, ast_node *stmt) {
     if (!stmt) return true;
-
-    printf("[DEBUG CODEGEN] generate_statement: type = %d\n", (int)stmt->type);
 
     switch (stmt->type) {
     case ast_node_type::STMT_COMPOUND: {
@@ -187,19 +184,18 @@ static bool generate_statement(x86_generator &cg, ast_node *stmt) {
             // Result is already in RAX, which is the return register
         } else {
             // Return void - set RAX to 0
-            emit_instruction_reg_imm(cg, "mov", reg::RAX, 0);
+            emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, 0);
         }
 
         // Jump to procedure epilogue
-        emit_instruction_reg_reg(cg, "mov", reg::RSP, reg::RBP);
-        emit_instruction_reg(cg, "pop", reg::RBP);
+        emit_instruction_reg_reg(cg, "mov", x86_linux_register::RSP, x86_linux_register::RBP);
+        emit_instruction_reg(cg, "pop", x86_linux_register::RBP);
         emit_instruction(cg, "ret");
         return true;
     }
 
     case ast_node_type::STMT_EXPRESSION: {
         ast_stmt_expression *expr_stmt = (ast_stmt_expression *)stmt;
-        printf("[DEBUG CODEGEN] Expression statement - calling generate_expression\n");
         emit_comment(cg, "Expression statement");
         return generate_expression(cg, expr_stmt->expression);
     }
@@ -217,7 +213,7 @@ static bool generate_statement(x86_generator &cg, ast_node *stmt) {
         }
 
         // Test result and jump if false
-        emit_instruction_reg_imm(cg, "cmp", reg::RAX, 0);
+        emit_instruction_reg_imm(cg, "cmp", x86_linux_register::RAX, 0);
         fprintf(cg.out_file, "\tje %s\n", else_label);
 
         // Generate then block
@@ -245,38 +241,26 @@ static bool generate_statement(x86_generator &cg, ast_node *stmt) {
     }
 }
 
-static bool generate_expression(x86_generator &cg, ast_node *expr) {
+static bool generate_expression(x86_linux_generator &cg, ast_node *expr) {
     if (!expr) {
-        printf("[DEBUG CODEGEN] generate_expression: expr is null\n");
         return false;
     }
 
-    printf("[DEBUG CODEGEN] generate_expression: type = %d (%s)\n", (int)expr->type,
-           expr->type == ast_node_type::EXPR_CALL         ? "EXPR_CALL"
-           : expr->type == ast_node_type::EXPR_LITERAL    ? "EXPR_LITERAL"
-           : expr->type == ast_node_type::EXPR_IDENTIFIER ? "EXPR_IDENTIFIER"
-                                                          : "OTHER");
-
     switch (expr->type) {
     case ast_node_type::EXPR_CALL:
-        printf("[DEBUG CODEGEN] Calling generate_function_call\n");
         return generate_function_call(cg, (ast_expr_call *)expr);
     case ast_node_type::EXPR_LITERAL:
-        printf("[DEBUG CODEGEN] Calling generate_literal\n");
         return generate_literal(cg, (ast_expr_literal *)expr);
     case ast_node_type::EXPR_IDENTIFIER:
-        printf("[DEBUG CODEGEN] Calling generate_identifier\n");
         return generate_identifier(cg, (ast_expr_identifier *)expr);
     case ast_node_type::EXPR_BINARY:
-        printf("[DEBUG CODEGEN] Calling generate_binary_expression\n");
         return generate_binary_expression(cg, (ast_expr_binary *)expr);
     default:
-        printf("[DEBUG CODEGEN] Unknown expression type: %d\n", (int)expr->type);
         return false;
     }
 }
 
-static bool generate_global_variable(x86_generator &cg, ast_decl_variable *var_decl) {
+static bool generate_global_variable(x86_linux_generator &cg, ast_decl_variable *var_decl) {
     char var_name[256];
     snprintf(var_name, sizeof(var_name), "%.*s", var_decl->name_len, var_decl->name);
 
@@ -335,7 +319,7 @@ static bool generate_global_variable(x86_generator &cg, ast_decl_variable *var_d
     return true;
 }
 
-static bool generate_literal(x86_generator &cg, ast_expr_literal *lit) {
+static bool generate_literal(x86_linux_generator &cg, ast_expr_literal *lit) {
     switch (lit->type) {
     case literal_type::INTEGER: {
         char value_str[32];
@@ -343,7 +327,7 @@ static bool generate_literal(x86_generator &cg, ast_expr_literal *lit) {
         i32 value = atoi(value_str);
 
         emit_comment(cg, "Integer literal: %d", value);
-        emit_instruction_reg_imm(cg, "mov", reg::RAX, value);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, value);
         return true;
     }
 
@@ -354,7 +338,7 @@ static bool generate_literal(x86_generator &cg, ast_expr_literal *lit) {
         bool is_true = (strncmp(value_str, "true", 4) == 0);
 
         emit_comment(cg, "Boolean literal: %s", is_true ? "true" : "false");
-        emit_instruction_reg_imm(cg, "mov", reg::RAX, is_true ? 1 : 0);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, is_true ? 1 : 0);
         return true;
     }
 
@@ -429,7 +413,7 @@ static bool generate_literal(x86_generator &cg, ast_expr_literal *lit) {
         }
 
         emit_comment(cg, "Character literal: %c (%d)", char_value, (int)char_value);
-        emit_instruction_reg_imm(cg, "mov", reg::RAX, (i32)char_value);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, (i32)char_value);
         return true;
     }
 
@@ -441,7 +425,7 @@ static bool generate_literal(x86_generator &cg, ast_expr_literal *lit) {
         emit_comment(cg, "Float literal: %s (TODO: proper float handling)", value_str);
         // For now, just convert to int (this is a placeholder)
         i32 int_value = (i32)atof(value_str);
-        emit_instruction_reg_imm(cg, "mov", reg::RAX, int_value);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, int_value);
         return true;
     }
 
@@ -451,7 +435,7 @@ static bool generate_literal(x86_generator &cg, ast_expr_literal *lit) {
     }
 }
 
-static bool generate_identifier(x86_generator &cg, ast_expr_identifier *ident) {
+static bool generate_identifier(x86_linux_generator &cg, ast_expr_identifier *ident) {
     char name[256];
     snprintf(name, sizeof(name), "%.*s", ident->name_len, ident->name);
 
@@ -469,14 +453,14 @@ static bool generate_identifier(x86_generator &cg, ast_expr_identifier *ident) {
     return true;
 }
 
-static bool generate_binary_expression(x86_generator &cg, ast_expr_binary *binary) {
+static bool generate_binary_expression(x86_linux_generator &cg, ast_expr_binary *binary) {
     emit_comment(cg, "Binary expression: %s", binary_op_to_string(binary->op));
 
     // Generate right operand first
     if (!generate_expression(cg, binary->right)) {
         return false;
     }
-    emit_instruction_reg(cg, "push", reg::RAX); // Save right operand
+    emit_instruction_reg(cg, "push", x86_linux_register::RAX); // Save right operand
 
     // Generate left operand
     if (!generate_expression(cg, binary->left)) {
@@ -484,90 +468,90 @@ static bool generate_binary_expression(x86_generator &cg, ast_expr_binary *binar
     }
 
     // Pop right operand into RCX
-    emit_instruction_reg(cg, "pop", reg::RCX);
+    emit_instruction_reg(cg, "pop", x86_linux_register::RCX);
 
     // Perform operation (left in RAX, right in RCX)
     switch (binary->op) {
     case binary_op::ADD:
-        emit_instruction_reg_reg(cg, "add", reg::RAX, reg::RCX);
+        emit_instruction_reg_reg(cg, "add", x86_linux_register::RAX, x86_linux_register::RCX);
         break;
 
     case binary_op::SUB:
-        emit_instruction_reg_reg(cg, "sub", reg::RAX, reg::RCX);
+        emit_instruction_reg_reg(cg, "sub", x86_linux_register::RAX, x86_linux_register::RCX);
         break;
 
     case binary_op::MUL:
-        emit_instruction_reg_reg(cg, "imul", reg::RAX, reg::RCX);
+        emit_instruction_reg_reg(cg, "imul", x86_linux_register::RAX, x86_linux_register::RCX);
         break;
 
     case binary_op::DIV:
         // x86 division is more complex - need to clear RDX and use idiv
         emit_comment(cg, "Division: clear RDX and divide");
-        emit_instruction_reg_imm(cg, "mov", reg::RDX, 0); // Clear upper 64 bits
-        fprintf(cg.out_file, "\tidiv rcx\n");             // Signed divide RAX by RCX, result in RAX
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RDX, 0); // Clear upper 64 bits
+        fprintf(cg.out_file, "\tidiv rcx\n");                            // Signed divide RAX by RCX, result in RAX
         break;
 
     case binary_op::MOD:
         // Modulo is similar to division, but result is in RDX
         emit_comment(cg, "Modulo: clear RDX and divide, result in RDX");
-        emit_instruction_reg_imm(cg, "mov", reg::RDX, 0);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RDX, 0);
         fprintf(cg.out_file, "\tidiv rcx\n");
-        emit_instruction_reg_reg(cg, "mov", reg::RAX, reg::RDX); // Move remainder to RAX
+        emit_instruction_reg_reg(cg, "mov", x86_linux_register::RAX, x86_linux_register::RDX); // Move remainder to RAX
         break;
 
     case binary_op::EQ:
-        emit_instruction_reg_reg(cg, "cmp", reg::RAX, reg::RCX);
-        emit_instruction_reg_imm(cg, "mov", reg::RAX, 0); // Assume false
-        emit_instruction_reg_imm(cg, "mov", reg::RDX, 1); // True value
-        fprintf(cg.out_file, "\tcmove rax, rdx\n");       // Move 1 to RAX if equal
+        emit_instruction_reg_reg(cg, "cmp", x86_linux_register::RAX, x86_linux_register::RCX);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, 0); // Assume false
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RDX, 1); // True value
+        fprintf(cg.out_file, "\tcmove rax, rdx\n");                      // Move 1 to RAX if equal
         break;
 
     case binary_op::NE:
-        emit_instruction_reg_reg(cg, "cmp", reg::RAX, reg::RCX);
-        emit_instruction_reg_imm(cg, "mov", reg::RAX, 0); // Assume false
-        emit_instruction_reg_imm(cg, "mov", reg::RDX, 1); // True value
-        fprintf(cg.out_file, "\tcmovne rax, rdx\n");      // Move 1 to RAX if not equal
+        emit_instruction_reg_reg(cg, "cmp", x86_linux_register::RAX, x86_linux_register::RCX);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, 0); // Assume false
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RDX, 1); // True value
+        fprintf(cg.out_file, "\tcmovne rax, rdx\n");                     // Move 1 to RAX if not equal
         break;
 
     case binary_op::LT:
-        emit_instruction_reg_reg(cg, "cmp", reg::RAX, reg::RCX);
-        emit_instruction_reg_imm(cg, "mov", reg::RAX, 0);
-        emit_instruction_reg_imm(cg, "mov", reg::RDX, 1);
+        emit_instruction_reg_reg(cg, "cmp", x86_linux_register::RAX, x86_linux_register::RCX);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, 0);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RDX, 1);
         fprintf(cg.out_file, "\tcmovl rax, rdx\n"); // Move 1 if less than
         break;
 
     case binary_op::LE:
-        emit_instruction_reg_reg(cg, "cmp", reg::RAX, reg::RCX);
-        emit_instruction_reg_imm(cg, "mov", reg::RAX, 0);
-        emit_instruction_reg_imm(cg, "mov", reg::RDX, 1);
+        emit_instruction_reg_reg(cg, "cmp", x86_linux_register::RAX, x86_linux_register::RCX);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, 0);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RDX, 1);
         fprintf(cg.out_file, "\tcmovle rax, rdx\n"); // Move 1 if less than or equal
         break;
 
     case binary_op::GT:
-        emit_instruction_reg_reg(cg, "cmp", reg::RAX, reg::RCX);
-        emit_instruction_reg_imm(cg, "mov", reg::RAX, 0);
-        emit_instruction_reg_imm(cg, "mov", reg::RDX, 1);
+        emit_instruction_reg_reg(cg, "cmp", x86_linux_register::RAX, x86_linux_register::RCX);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, 0);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RDX, 1);
         fprintf(cg.out_file, "\tcmovg rax, rdx\n"); // Move 1 if greater than
         break;
 
     case binary_op::GE:
-        emit_instruction_reg_reg(cg, "cmp", reg::RAX, reg::RCX);
-        emit_instruction_reg_imm(cg, "mov", reg::RAX, 0);
-        emit_instruction_reg_imm(cg, "mov", reg::RDX, 1);
+        emit_instruction_reg_reg(cg, "cmp", x86_linux_register::RAX, x86_linux_register::RCX);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, 0);
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RDX, 1);
         fprintf(cg.out_file, "\tcmovge rax, rdx\n"); // Move 1 if greater than or equal
         break;
 
     case binary_op::LOGICAL_AND:
         // Short-circuit evaluation: if left is false, result is false
         emit_comment(cg, "Logical AND");
-        emit_instruction_reg_imm(cg, "cmp", reg::RAX, 0);
+        emit_instruction_reg_imm(cg, "cmp", x86_linux_register::RAX, 0);
         fprintf(cg.out_file, "\tje .L_and_false_%d\n", cg.label_counter);
-        emit_instruction_reg_imm(cg, "cmp", reg::RCX, 0);
+        emit_instruction_reg_imm(cg, "cmp", x86_linux_register::RCX, 0);
         fprintf(cg.out_file, "\tje .L_and_false_%d\n", cg.label_counter);
-        emit_instruction_reg_imm(cg, "mov", reg::RAX, 1); // Both true
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, 1); // Both true
         fprintf(cg.out_file, "\tjmp .L_and_end_%d\n", cg.label_counter);
         fprintf(cg.out_file, ".L_and_false_%d:\n", cg.label_counter);
-        emit_instruction_reg_imm(cg, "mov", reg::RAX, 0); // At least one false
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, 0); // At least one false
         fprintf(cg.out_file, ".L_and_end_%d:\n", cg.label_counter);
         cg.label_counter++;
         break;
@@ -575,14 +559,14 @@ static bool generate_binary_expression(x86_generator &cg, ast_expr_binary *binar
     case binary_op::LOGICAL_OR:
         // Short-circuit evaluation: if left is true, result is true
         emit_comment(cg, "Logical OR");
-        emit_instruction_reg_imm(cg, "cmp", reg::RAX, 0);
+        emit_instruction_reg_imm(cg, "cmp", x86_linux_register::RAX, 0);
         fprintf(cg.out_file, "\tjne .L_or_true_%d\n", cg.label_counter);
-        emit_instruction_reg_imm(cg, "cmp", reg::RCX, 0);
+        emit_instruction_reg_imm(cg, "cmp", x86_linux_register::RCX, 0);
         fprintf(cg.out_file, "\tjne .L_or_true_%d\n", cg.label_counter);
-        emit_instruction_reg_imm(cg, "mov", reg::RAX, 0); // Both false
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, 0); // Both false
         fprintf(cg.out_file, "\tjmp .L_or_end_%d\n", cg.label_counter);
         fprintf(cg.out_file, ".L_or_true_%d:\n", cg.label_counter);
-        emit_instruction_reg_imm(cg, "mov", reg::RAX, 1); // At least one true
+        emit_instruction_reg_imm(cg, "mov", x86_linux_register::RAX, 1); // At least one true
         fprintf(cg.out_file, ".L_or_end_%d:\n", cg.label_counter);
         cg.label_counter++;
         break;
@@ -595,56 +579,41 @@ static bool generate_binary_expression(x86_generator &cg, ast_expr_binary *binar
     return true;
 }
 
-static bool generate_function_call(x86_generator &cg, ast_expr_call *call) {
-    printf("[DEBUG CODEGEN] generate_function_call: call has %u arguments\n", call->argument_count);
+static bool generate_function_call(x86_linux_generator &cg, ast_expr_call *call) {
 
     // Check if this is a builtin function
     if (call->procedure->type == ast_node_type::EXPR_IDENTIFIER) {
         ast_expr_identifier *func_name = (ast_expr_identifier *)call->procedure;
-        printf("[DEBUG CODEGEN] Function name: '%.*s' (len=%u)\n", func_name->name_len, func_name->name,
-               func_name->name_len);
 
         // Check for builtin functions
         if (strncmp(func_name->name, "print", func_name->name_len) == 0 && func_name->name_len == 5) {
-            printf("[DEBUG CODEGEN] Calling generate_print_call\n");
             return generate_print_call(cg, call);
         }
         if (strncmp(func_name->name, "println", func_name->name_len) == 0 && func_name->name_len == 7) {
-            printf("[DEBUG CODEGEN] Calling generate_println_call\n");
             return generate_println_call(cg, call);
         }
-
-        printf("[DEBUG CODEGEN] Function '%.*s' not recognized as builtin\n", func_name->name_len, func_name->name);
-    } else {
-        printf("[DEBUG CODEGEN] Call procedure is not an identifier (type=%d)\n", (int)call->procedure->type);
     }
 
     emit_comment(cg, "TODO: User-defined function call");
     return false;
 }
 
-bool generate_print_call(x86_generator &cg, ast_expr_call *call) {
-    printf("[DEBUG CODEGEN] generate_print_call called\n");
+bool generate_print_call(x86_linux_generator &cg, ast_expr_call *call) {
 
     if (call->argument_count != 1) {
-        printf("[DEBUG CODEGEN] print call has wrong number of arguments: %u\n", call->argument_count);
         return false;
     }
 
     // For now, only support string literals
     ast_node *arg = call->arguments[0];
     if (arg->type != ast_node_type::EXPR_LITERAL) {
-        printf("[DEBUG CODEGEN] print argument is not a literal (type=%d)\n", (int)arg->type);
         return false;
     }
 
     ast_expr_literal *str_literal = (ast_expr_literal *)arg;
     if (str_literal->type != literal_type::STRING) {
-        printf("[DEBUG CODEGEN] print literal is not a string (type=%d)\n", (int)str_literal->type);
         return false;
     }
-
-    printf("[DEBUG CODEGEN] Generating syscall for string: '%.*s'\n", str_literal->value_len, str_literal->value);
 
     emit_comment(cg, "print(\"%.*s\") - using write syscall", str_literal->value_len, str_literal->value);
 
@@ -718,7 +687,7 @@ bool generate_print_call(x86_generator &cg, ast_expr_call *call) {
     return true;
 }
 
-bool generate_println_call(x86_generator &cg, ast_expr_call *call) {
+bool generate_println_call(x86_linux_generator &cg, ast_expr_call *call) {
     // Print the string first
     if (!generate_print_call(cg, call)) return false;
 
@@ -823,7 +792,7 @@ bool generate_println_call(x86_generator &cg, ast_expr_call *call) {
 //     return true;
 // }
 
-static bool generate_exit_call(x86_generator &cg, int exit_code) {
+static bool generate_exit_call(x86_linux_generator &cg, int exit_code) {
     emit_comment(cg, "Exit with code %d", exit_code);
     fprintf(cg.out_file, "\tmov rax, 60\n");            // sys_exit
     fprintf(cg.out_file, "\tmov rdi, %d\n", exit_code); // exit code
@@ -835,7 +804,7 @@ static bool generate_exit_call(x86_generator &cg, int exit_code) {
 // ASSEMBLY OUTPUT HELPERS
 // =============================================================================
 
-void emit_comment(x86_generator &cg, const char *comment, ...) {
+static void emit_comment(x86_linux_generator &cg, const char *comment, ...) {
     fprintf(cg.out_file, "\t# ");
     va_list args;
     va_start(args, comment);
@@ -844,31 +813,33 @@ void emit_comment(x86_generator &cg, const char *comment, ...) {
     fprintf(cg.out_file, "\n");
 }
 
-void emit_label(x86_generator &cg, const char *label) {
+static void emit_label(x86_linux_generator &cg, const char *label) {
     fprintf(cg.out_file, "%s:\n", label);
 }
 
-void emit_directive(x86_generator &cg, const char *directive) {
+static void emit_directive(x86_linux_generator &cg, const char *directive) {
     fprintf(cg.out_file, "%s\n", directive);
 }
 
-void emit_instruction(x86_generator &cg, const char *instr) {
+static void emit_instruction(x86_linux_generator &cg, const char *instr) {
     fprintf(cg.out_file, "\t%s\n", instr);
 }
 
-void emit_instruction_reg(x86_generator &cg, const char *instr, reg r) {
+static void emit_instruction_reg(x86_linux_generator &cg, const char *instr, x86_linux_register r) {
     fprintf(cg.out_file, "\t%s %s\n", instr, reg_name_64(r));
 }
 
-void emit_instruction_reg_reg(x86_generator &cg, const char *instr, reg dst, reg src) {
+static void emit_instruction_reg_reg(x86_linux_generator &cg, const char *instr, x86_linux_register dst,
+                                     x86_linux_register src) {
     fprintf(cg.out_file, "\t%s %s, %s\n", instr, reg_name_64(dst), reg_name_64(src));
 }
 
-void emit_instruction_reg_imm(x86_generator &cg, const char *instr, reg r, i32 imm) {
+static void emit_instruction_reg_imm(x86_linux_generator &cg, const char *instr, x86_linux_register r, i32 imm) {
     fprintf(cg.out_file, "\t%s %s, %d\n", instr, reg_name_64(r), imm);
 }
 
-void emit_instruction_reg_mem(x86_generator &cg, const char *instr, reg r, reg base, i32 offset) {
+static void emit_instruction_reg_mem(x86_linux_generator &cg, const char *instr, x86_linux_register r,
+                                     x86_linux_register base, i32 offset) {
     if (offset == 0) {
         fprintf(cg.out_file, "\t%s %s, [%s]\n", instr, reg_name_64(r), reg_name_64(base));
     } else {
@@ -876,93 +847,93 @@ void emit_instruction_reg_mem(x86_generator &cg, const char *instr, reg r, reg b
     }
 }
 
-static const char *reg_name_64(reg r) {
+static const char *reg_name_64(x86_linux_register r) {
     switch (r) {
-    case reg::RAX:
+    case x86_linux_register::RAX:
         return "rax";
-    case reg::RBX:
+    case x86_linux_register::RBX:
         return "rbx";
-    case reg::RCX:
+    case x86_linux_register::RCX:
         return "rcx";
-    case reg::RDX:
+    case x86_linux_register::RDX:
         return "rdx";
-    case reg::RSI:
+    case x86_linux_register::RSI:
         return "rsi";
-    case reg::RDI:
+    case x86_linux_register::RDI:
         return "rdi";
-    case reg::RBP:
+    case x86_linux_register::RBP:
         return "rbp";
-    case reg::RSP:
+    case x86_linux_register::RSP:
         return "rsp";
-    case reg::R8:
+    case x86_linux_register::R8:
         return "r8";
-    case reg::R9:
+    case x86_linux_register::R9:
         return "r9";
-    case reg::R10:
+    case x86_linux_register::R10:
         return "r10";
-    case reg::R11:
+    case x86_linux_register::R11:
         return "r11";
-    case reg::R12:
+    case x86_linux_register::R12:
         return "r12";
-    case reg::R13:
+    case x86_linux_register::R13:
         return "r13";
-    case reg::R14:
+    case x86_linux_register::R14:
         return "r14";
-    case reg::R15:
+    case x86_linux_register::R15:
         return "r15";
     default:
         return "???";
     }
 }
 
-static const char *reg_name_32(reg r) {
+static const char *reg_name_32(x86_linux_register r) {
     switch (r) {
-    case reg::RAX:
-    case reg::EAX:
+    case x86_linux_register::RAX:
+    case x86_linux_register::EAX:
         return "eax";
-    case reg::RBX:
-    case reg::EBX:
+    case x86_linux_register::RBX:
+    case x86_linux_register::EBX:
         return "ebx";
-    case reg::RCX:
-    case reg::ECX:
+    case x86_linux_register::RCX:
+    case x86_linux_register::ECX:
         return "ecx";
-    case reg::RDX:
-    case reg::EDX:
+    case x86_linux_register::RDX:
+    case x86_linux_register::EDX:
         return "edx";
-    case reg::RSI:
-    case reg::ESI:
+    case x86_linux_register::RSI:
+    case x86_linux_register::ESI:
         return "esi";
-    case reg::RDI:
-    case reg::EDI:
+    case x86_linux_register::RDI:
+    case x86_linux_register::EDI:
         return "edi";
-    case reg::RBP:
-    case reg::EBP:
+    case x86_linux_register::RBP:
+    case x86_linux_register::EBP:
         return "ebp";
-    case reg::RSP:
-    case reg::ESP:
+    case x86_linux_register::RSP:
+    case x86_linux_register::ESP:
         return "esp";
-    case reg::R8:
+    case x86_linux_register::R8:
         return "r8d";
-    case reg::R9:
+    case x86_linux_register::R9:
         return "r9d";
-    case reg::R10:
+    case x86_linux_register::R10:
         return "r10d";
-    case reg::R11:
+    case x86_linux_register::R11:
         return "r11d";
-    case reg::R12:
+    case x86_linux_register::R12:
         return "r12d";
-    case reg::R13:
+    case x86_linux_register::R13:
         return "r13d";
-    case reg::R14:
+    case x86_linux_register::R14:
         return "r14d";
-    case reg::R15:
+    case x86_linux_register::R15:
         return "r15d";
     default:
         return "???";
     }
 }
 
-static char *generate_label(x86_generator &cg, const char *prefix) {
+static char *generate_label(x86_linux_generator &cg, const char *prefix) {
     char *label = (char *)arena_alloc(*cg.memory, 64);
     snprintf(label, 64, ".L%s%d", prefix, cg.label_counter++);
     return label;
@@ -993,7 +964,7 @@ static const char *builtin_type_size_suffix(builtin_type type) {
     }
 }
 
-static const char *reg_name_for_type(reg r, builtin_type type) {
+static const char *reg_name_for_type(x86_linux_register r, builtin_type type) {
     switch (builtin_type_size_suffix(type)[0]) {
     case 'b': // 8-bit registers would need separate handling
     case 'w': // 16-bit registers would need separate handling

@@ -1,11 +1,11 @@
-#include "compiler.hpp"
 #include "ast.hpp"
+#include "compiler.hpp"
+#include "generator.hpp"
 #include "lexer.hpp"
 #include "logger.hpp"
 #include "memory.hpp"
 #include "parser.hpp"
 #include "semantic.hpp"
-#include "x86_generator.hpp"
 
 #include <cstdlib>
 #include <fstream>
@@ -166,13 +166,15 @@ static bool code_generation(compiler &c, const std::string &output_file) {
         return false;
     }
 
-    if (!x86_gen_init(c.generator, c.memory, asm_file)) {
+    // if (!x86_linux_generator_init(c.generator, c.memory, asm_file)) {
+    if (!x86_windows_generator_init(c.generator, c.memory, asm_file)) {
         error("Failed to initialize code generator");
         fclose(asm_file);
         return false;
     }
 
-    bool success = generate_x86(c.generator, c.program);
+    // bool success = x86_linux_generate_asm(c.generator, c.program);
+    bool success = x86_windows_generate_asm(c.generator, c.program);
     fclose(asm_file);
 
     if (!success) {
@@ -273,7 +275,13 @@ static i32 run_program(compiler &c, const std::string &executable) {
 
     std::string cmd = "./" + executable;
     i32 run_result = system(cmd.c_str());
-    i32 exit_code = WEXITSTATUS(run_result);
+
+    i32 exit_code;
+#ifdef _WIN32
+    exit_code = run_result;
+#else
+    exit_code = WEXITSTATUS(run_result);
+#endif
 
     if (c.current_options.verbose) {
         info("✅ Program executed with exit code: %d", exit_code);
@@ -325,7 +333,8 @@ static std::string read_file(compiler &c, const std::string &filename) {
 
 static void cleanup(compiler &c) {
     if (c.memory.memory) {
-        x86_gen_deinit(c.generator);
+        // x86_linux_generator_deinit(c.generator);
+        x86_windows_generator_deinit(c.generator);
         semantic_analyzer_deinit(c.analyzer);
         parser_deinit(c.parser);
         arena_deinit(c.memory);

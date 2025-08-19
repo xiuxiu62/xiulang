@@ -1,11 +1,11 @@
 #pragma once
 
 #include "defines.hpp"
+#include "generator.hpp"
 #include "lexer.hpp"
 #include "memory.hpp"
 #include "parser.hpp"
 #include "semantic.hpp"
-#include "x86_generator.hpp"
 #include <string>
 
 struct compiler_options {
@@ -27,12 +27,32 @@ struct compiler_result {
     i32 exit_code = -1;
 };
 
+struct compilation_unit {
+    const char *source_file = nullptr;
+    const char *output_file = nullptr;
+    ast_node *ast = nullptr;
+    symbol_table *exports = nullptr;
+};
+
+// struct string_literal {
+//     const char *content;
+//     u32 length;
+//     u32 id;
+// };
+
+// struct static_data {
+//     const char *content;
+//     u32 length;
+//     u32 id;
+// };
+
 struct compiler {
     arena memory = {};
     struct lexer lexer = {};
     struct parser parser = {};
     semantic_analyzer analyzer = {};
-    x86_generator generator = {};
+    // x86_linux_generator generator = {};
+    x86_windows_generator generator = {};
     ast_node *program = nullptr;
     compiler_options current_options = {};
 };
