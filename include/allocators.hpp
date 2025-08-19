@@ -3,13 +3,27 @@
 #include "defines.hpp"
 
 struct block_allocator {
-    bool init(u32 size);
+    struct growth_strategy {
+        bool auto_resizes = false;
+        f32 growth_factor = 2.0f;
+    };
+
+    void *memory = nullptr;
+    void *free_head = nullptr;
+    u32 block_size = 0;
+    u32 total_blocks = 0;
+    u32 free_blocks = 0;
+    growth_strategy grow_strat;
+    bool owns_memory : 1 = false;
+
+    bool init(u32 block_size, u32 block_count, growth_strategy grow_strat = {false, 2.0f});
+    bool init(void *borrowed_memory, usize memory_size, u32 block_size);
     void deinit();
 
     void *alloc(u32 size);
     void *realloc(void *ptr, u32 size);
     void dealloc(void *ptr);
-    void stats();
+    void stats() const;
 };
 
 struct arena_allocator {
