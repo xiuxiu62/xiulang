@@ -182,20 +182,28 @@ token lexer_next_token(struct lexer &l) {
     // Multi-character tokens first
     lexer_advance(l); // consume first character
 
+    char next;
+
     switch (c) {
     case ':':
-        if (lexer_peek(l) == ':') {
+        next = lexer_peek(l);
+        switch (next) {
+        case ':':
             lexer_advance(l);
             return {start, token_type::COLON_COLON, 2, start_row, start_col};
+        case '=':
+            lexer_advance(l);
+            return {start, token_type::COLON_EQUAL, 2, start_row, start_col};
         }
         return {start, token_type::COLON, 1, start_row, start_col};
 
     case '-':
-        if (lexer_peek(l) == '>') {
+        next = lexer_peek(l);
+        switch (next) {
+        case '>':
             lexer_advance(l);
             return {start, token_type::ARROW, 2, start_row, start_col};
-        }
-        if (lexer_peek(l) == '=') {
+        case '=':
             lexer_advance(l);
             return {start, token_type::SUB_ASSIGN, 2, start_row, start_col};
         }
@@ -245,22 +253,24 @@ token lexer_next_token(struct lexer &l) {
                 start_col}; // FIXED: Use EXCLAMATION instead of LOGICAL_NOT
 
     case '<':
-        if (lexer_peek(l) == '=') {
+        next = lexer_peek(l);
+        switch (next) {
+        case '=':
             lexer_advance(l);
             return {start, token_type::LESS_EQUAL, 2, start_row, start_col};
-        }
-        if (lexer_peek(l) == '<') {
+        case '<':
             lexer_advance(l);
             return {start, token_type::LEFT_SHIFT, 2, start_row, start_col};
         }
         return {start, token_type::LESS, 1, start_row, start_col};
 
     case '>':
-        if (lexer_peek(l) == '=') {
+        next = lexer_peek(l);
+        switch (next) {
+        case '=':
             lexer_advance(l);
             return {start, token_type::GREATER_EQUAL, 2, start_row, start_col};
-        }
-        if (lexer_peek(l) == '>') {
+        case '>':
             lexer_advance(l);
             return {start, token_type::RIGHT_SHIFT, 2, start_row, start_col};
         }
@@ -282,6 +292,8 @@ token lexer_next_token(struct lexer &l) {
 
     case '^':
         return {start, token_type::BITWISE_XOR, 1, start_row, start_col};
+    case '~':
+        return {start, token_type::BITWISE_NOT, 1, start_row, start_col};
 
     // Single character tokens
     case '\n':

@@ -1,8 +1,8 @@
 #pragma once
 
+#include "allocators.hpp"
 #include "defines.hpp"
 #include "lexer.hpp"
-#include "memory.hpp"
 #include "parser.hpp"
 #include "semantic.hpp"
 #include "x86_generator.hpp"
@@ -28,7 +28,8 @@ struct compiler_result {
 };
 
 struct compiler {
-    arena allocator = {};
+    block_allocator allocator = {};
+    // arena allocator = {};
     struct lexer lexer = {};
     struct parser parser = {};
     semantic_analyzer analyzer = {};

@@ -60,6 +60,8 @@ std::string token_type_to_string(token_type type) {
         return "BREAK";
     case token_type::CONTINUE:
         return "CONTINUE";
+    case token_type::DEFER:
+        return "DEFER";
 
     // Module system keywords
     case token_type::MOD:
@@ -80,13 +82,10 @@ std::string token_type_to_string(token_type type) {
         return "PLUS";
     case token_type::MINUS:
         return "MINUS";
-    case token_type::MULTIPLY:
     case token_type::STAR:
         return "STAR";
-    case token_type::DIVIDE:
     case token_type::SLASH:
         return "SLASH";
-    case token_type::MODULO:
     case token_type::PERCENT:
         return "PERCENT";
 
@@ -111,7 +110,6 @@ std::string token_type_to_string(token_type type) {
         return "LOGICAL_AND";
     case token_type::LOGICAL_OR:
         return "LOGICAL_OR";
-    case token_type::LOGICAL_NOT:
     case token_type::EXCLAMATION:
         return "EXCLAMATION";
 
@@ -122,6 +120,8 @@ std::string token_type_to_string(token_type type) {
         return "BITWISE_OR";
     case token_type::BITWISE_XOR:
         return "BITWISE_XOR";
+    case token_type::BITWISE_NOT:
+        return "BITWISE_NOT";
     case token_type::LEFT_SHIFT:
         return "LEFT_SHIFT";
     case token_type::RIGHT_SHIFT:
@@ -166,6 +166,8 @@ std::string token_type_to_string(token_type type) {
         return "COLON_COLON";
     case token_type::COLON:
         return "COLON";
+    case token_type::COLON_EQUAL:
+        return "COLON_EQUAL";
     case token_type::ARROW:
         return "ARROW";
 

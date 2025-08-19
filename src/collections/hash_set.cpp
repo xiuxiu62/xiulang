@@ -1,6 +1,5 @@
+#include "allocators.hpp"
 #include "collections.hpp"
-#include "memory.hpp"
-#include <vcruntime_string.h>
 
 // template <typename K> struct hash_set {
 //     struct entry {
@@ -13,8 +12,7 @@
 //     u32 bucket_count;
 //     u32 size;
 
-template <typename K> bool hash_set<K>::init(arena &allocator, u32 initial_capacity) {
-
+template <typename K> bool hash_set<K>::init(arena_allocator &allocator, u32 initial_capacity) {
     if (initial_capacity == 0) initial_capacity = DEFAULT_CAPACITY;
 
     bucket_count = 1;
@@ -22,7 +20,7 @@ template <typename K> bool hash_set<K>::init(arena &allocator, u32 initial_capac
         bucket_count <<= 1;
     }
 
-    buckets = (entry *)alloc(allocator, sizeof(entry) * bucket_count);
+    buckets = (entry *)allocator.alloc(sizeof(entry) * bucket_count);
     if (!buckets) return false;
     this->allocator = &allocator;
 

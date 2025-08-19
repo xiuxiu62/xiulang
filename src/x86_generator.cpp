@@ -1,7 +1,7 @@
 #include "x86_generator.hpp"
+#include "allocators.hpp"
 #include "ast.hpp"
 #include "defines.hpp"
-#include "memory.hpp"
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -41,8 +41,8 @@ static const char *reg_name_for_type(reg r, builtin_type type);
 
 extern const char *binary_op_to_string(binary_op op);
 
-bool x86_gen_init(x86_generator &cg, arena &memory, FILE *out_file) {
-    cg.memory = &memory;
+bool x86_gen_init(x86_generator &cg, arena_allocator &memory, FILE *out_file) {
+    cg.allocator = &memory;
     cg.out_file = out_file;
     cg.stack_offset = 0;
     cg.label_counter = 0;
@@ -810,7 +810,7 @@ static char *generate_mangled_name(x86_generator &cg, const char **module_path, 
         total_len += strlen(module_path[i]) + 1; // +1 for underscore
     }
 
-    char *mangled = (char *)arena_alloc(*cg.memory, total_len + 1);
+    char *mangled = (char *)cg.allocator->alloc(total_len + 1);
     if (!mangled) return nullptr;
 
     // Build the mangled name: module1_module2_symbol
@@ -956,7 +956,7 @@ static const char *reg_name_32(reg r) {
 }
 
 static char *generate_label(x86_generator &cg, const char *prefix) {
-    char *label = (char *)arena_alloc(*cg.memory, 64);
+    char *label = (char *)cg.allocator->alloc(64);
     snprintf(label, 64, ".L%s%d", prefix, cg.label_counter++);
     return label;
 }

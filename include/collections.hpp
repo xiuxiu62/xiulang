@@ -42,11 +42,12 @@ template <typename T> struct pool {
 };
 
 template <typename T> u32 hash(const T &key);
-
 template <> u32 hash<u32>(const u32 &key);
 template <> u32 hash<u64>(const u64 &key);
+template <> u32 hash<usize>(const usize &key);
 template <> u32 hash<i32>(const i32 &key);
 template <> u32 hash<i64>(const i64 &key);
+template <> u32 hash<isize>(const isize &key);
 template <> u32 hash<const char *>(const char *const &key);
 
 template <typename K> struct hash_set {
@@ -57,6 +58,7 @@ template <typename K> struct hash_set {
     };
 
     block_allocator *allocator;
+
     entry *buckets;
     u32 bucket_count;
     u32 size;
@@ -64,6 +66,7 @@ template <typename K> struct hash_set {
     static constexpr u32 DEFAULT_CAPACITY = 16;
     static constexpr f32 MAX_LOD_FACTOR = 0.7f;
 
+    bool init(arena_allocator &allocator, u32 initial_capacity = DEFAULT_CAPACITY);
     bool init(block_allocator &allocator, u32 initial_capacity = DEFAULT_CAPACITY);
     void deinit();
 

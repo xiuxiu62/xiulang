@@ -83,4 +83,4 @@ constexpr bool will_move_to_stdlib(const builtin_procedure &builtin) {
 
 // Analysis helpers
 bool validate_builtin_call(builtin_registry &registry, ast_expr_call *call);
-st_node *get_builtin_return_type(builtin_registry &registry, const builtin_procedure &builtin, ast_expr_call *call);
+ast_node *get_builtin_return_type(builtin_registry &registry, const builtin_procedure &builtin, ast_expr_call *call);

@@ -1,9 +1,9 @@
 #pragma once
 
+#include "allocators.hpp"
 #include "ast.hpp"
 #include "builtins.hpp"
 #include "defines.hpp"
-#include "memory.hpp"
 #include "module.hpp"
 
 enum class symbol_type : u32 {

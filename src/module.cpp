@@ -1,17 +1,17 @@
 #include "module.hpp"
+#include "allocators.hpp"
 #include "ast.hpp"
 #include "collections.hpp"
-#include "memory.hpp"
 #include <cstring>
 
-static const char **create_full_path(arena &memory, const char **parent_path, u32 parent_depth, const char *name,
-                                     u32 name_len);
+static const char **create_full_path(arena_allocator &allocator, const char **parent_path, u32 parent_depth,
+                                     const char *name, u32 name_len);
 static bool paths_equal(const char **path1, u32 path1_len, const char **path2, u32 path2_len);
 static bool string_equals(const char *str1, u32 len1, const char *str2, u32 len2);
 
-bool module_registry_init(module_registry &registry, arena &memory) {
-    registry.allocator = &memory;
-    return registry.modules.init(32);
+bool module_registry_init(module_registry &registry, block_allocator &allocator) {
+    registry.allocator = &allocator;
+    return registry.modules.init(allocator, 32);
 }
 
 void module_registry_deinit(module_registry &registry) {
@@ -52,7 +52,7 @@ pool_handle register_module(module_registry &registry, ast_decl_module *module_a
     }
 
     // Copy module name to arena
-    char *name_copy = (char *)arena_alloc(*registry.allocator, module_ast->name_len + 1);
+    char *name_copy = (char *)registry.allocator->alloc(module_ast->name_len + 1);
     if (!name_copy) return pool_handle::invalid();
     strncpy(name_copy, module_ast->name, module_ast->name_len);
     name_copy[module_ast->name_len] = '\0';
@@ -65,7 +65,7 @@ pool_handle register_module(module_registry &registry, ast_decl_module *module_a
     new_module.path_depth = full_path_len;
     new_module.symbols = nullptr; // Will be created during analysis
     new_module.ast_node = module_ast;
-    new_module.uses.init(8); // Initialize with capacity for 8 uses
+    new_module.uses.init(*registry.allocator, 8); // Initialize with capacity for 8 uses
     new_module.is_analyzed = false;
     new_module.parent = parent;
 
@@ -116,17 +116,17 @@ pool_handle find_nested_module(module_registry &registry, pool_handle parent, co
 }
 
 // Helper function implementations
-static const char **create_full_path(arena &memory, const char **parent_path, u32 parent_depth, const char *name,
-                                     u32 name_len) {
+static const char **create_full_path(arena_allocator &allocator, const char **parent_path, u32 parent_depth,
+                                     const char *name, u32 name_len) {
     u32 new_depth = parent_depth + 1;
-    const char **full_path = (const char **)arena_alloc_array(memory, sizeof(const char *), new_depth);
+    const char **full_path = (const char **)allocator.alloc_array(sizeof(const char *), new_depth);
     if (!full_path) return nullptr;
 
     for (u32 i = 0; i < parent_depth; i++) {
         full_path[i] = parent_path[i];
     }
 
-    char *name_copy = (char *)arena_alloc(memory, name_len + 1);
+    char *name_copy = (char *)allocator.alloc(name_len + 1);
     if (!name_copy) return nullptr;
     strncpy(name_copy, name, name_len);
     name_copy[name_len] = '\0';

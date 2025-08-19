@@ -1,7 +1,7 @@
 #pragma once
 
+#include "allocators.hpp"
 #include "ast.hpp"
-#include "memory.hpp"
 #include <cstdio>
 
 enum class reg {
@@ -42,7 +42,7 @@ enum class reg {
 };
 
 struct x86_generator {
-    arena_allocator *memory;
+    arena_allocator *allocator;
     FILE *out_file;
 
     i32 stack_offset;  // Current stack pointer offset

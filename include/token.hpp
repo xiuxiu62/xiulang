@@ -47,18 +47,15 @@ enum class token_type : u32 {
     FALSE,
 
     // Arithmetic operators
-    PLUS,     // +
-    MINUS,    // -
-    MULTIPLY, // * (renamed from MULTIPLY)
-    STAR,     // * (alias for compatibility)
-    DIVIDE,   // /
-    SLASH,    // / (alias for compatibility)
-    MODULO,   // %
-    PERCENT,  // % (alias for compatibility)
+    PLUS,    // +
+    MINUS,   // -
+    STAR,    // *
+    SLASH,   // /
+    PERCENT, // %
 
     // Comparison operators
     EQUAL,         // =
-    EQUAL_EQUAL,   // == (added)
+    EQUAL_EQUAL,   // ==
     NOT_EQUAL,     // !=
     LESS,          // <
     GREATER,       // >
@@ -68,13 +65,13 @@ enum class token_type : u32 {
     // Logical operators
     LOGICAL_AND, // &&
     LOGICAL_OR,  // ||
-    LOGICAL_NOT, // ! (renamed)
-    EXCLAMATION, // ! (alias for compatibility)
+    EXCLAMATION, // !
 
     // Bitwise operators
     BITWISE_AND, // &
     BITWISE_OR,  // |
     BITWISE_XOR, // ^
+    BITWISE_NOT, // ~
     LEFT_SHIFT,  // <<
     RIGHT_SHIFT, // >>
 
@@ -100,6 +97,7 @@ enum class token_type : u32 {
     // New language-specific tokens
     COLON_COLON, // ::
     COLON,       // :
+    COLON_EQUAL, // :=
     ARROW,       // ->
 
     // String interpolation

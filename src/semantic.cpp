@@ -1,9 +1,9 @@
+#include "semantic.hpp"
+#include "allocators.hpp"
 #include "ast.hpp"
 #include "collections.hpp"
 #include "logger.hpp"
-#include "memory.hpp"
 #include "module.hpp"
-#include "semantic.hpp"
 #include <cstring>
 
 bool add_use_resolution(semantic_analyzer &analyzer, const char *local_name, u32 local_name_len,
@@ -11,7 +11,7 @@ bool add_use_resolution(semantic_analyzer &analyzer, const char *local_name, u32
 
 // static bool module_system_init(semantic_analyzer &analyzer, arena &memory);
 
-bool semantic_analyzer_init(semantic_analyzer &analyzer, arena &allocator) {
+bool semantic_analyzer_init(semantic_analyzer &analyzer, arena_allocator &allocator) {
     analyzer.allocator = &allocator;
     analyzer.current_scope = nullptr;
     analyzer.global_scope = nullptr;
@@ -21,8 +21,8 @@ bool semantic_analyzer_init(semantic_analyzer &analyzer, arena &allocator) {
     analyzer.error_column = 0;
     analyzer.current_procedure = nullptr;
     analyzer.expected_return_type = nullptr;
-    analyzer.current_stack_offset = 0;
-    analyzer.scope_counter = 0;
+    // analyzer.current_stack_offset = 0;
+    // analyzer.scope_counter = 0;
     analyzer.builtin_procedures = nullptr;
     analyzer.builtin_procedure_count = 0;
 
@@ -36,7 +36,7 @@ bool semantic_analyzer_init(semantic_analyzer &analyzer, arena &allocator) {
     if (!module_registry_init(analyzer.modules, allocator)) return false;
 
     // Register builtin procedures
-    register_builtin_procedures(analyzer.modules);
+    // register_builtin_procedures(analyzer.modules);
 
     return true;
 }
@@ -82,7 +82,7 @@ bool analyze(semantic_analyzer &analyzer, ast_node *program) {
 // =============================================================================
 
 symbol_table *symbol_table_create(semantic_analyzer &analyzer, symbol_table *parent) {
-    symbol_table *table = (symbol_table *)alloc(*analyzer.allocator, sizeof(symbol_table));
+    symbol_table *table = (symbol_table *)analyzer.allocator->alloc(sizeof(symbol_table));
     if (!table) return nullptr;
 
     table->symbols = nullptr;
@@ -91,7 +91,7 @@ symbol_table *symbol_table_create(semantic_analyzer &analyzer, symbol_table *par
     table->parent = parent;
     table->scope_depth = parent ? parent->scope_depth + 1 : 0;
 
-    table->symbols = (symbol *)alloc_array(*analyzer.allocator, sizeof(symbol), table->capacity);
+    table->symbols = (symbol *)analyzer.allocator->alloc_array(sizeof(symbol), table->capacity);
     if (!table->symbols) return nullptr;
 
     return table;
@@ -120,7 +120,7 @@ bool symbol_table_add(semantic_analyzer &analyzer, symbol_table *table, const sy
     // Resize if needed
     if (table->count >= table->capacity) {
         u32 new_capacity = table->capacity * 2;
-        symbol *new_symbols = (symbol *)alloc_array(*analyzer.allocator, sizeof(symbol), new_capacity);
+        symbol *new_symbols = (symbol *)analyzer.allocator->alloc_array(sizeof(symbol), new_capacity);
         if (!new_symbols) return false;
 
         // Copy existing symbols
@@ -168,7 +168,7 @@ void push_scope(semantic_analyzer &analyzer) {
     symbol_table *new_scope = symbol_table_create(analyzer, analyzer.current_scope);
     if (new_scope) {
         analyzer.current_scope = new_scope;
-        analyzer.scope_counter++;
+        // analyzer.scope_counter++;
     }
 }
 
@@ -266,8 +266,8 @@ bool analyze_variable_declaration(semantic_analyzer &analyzer, ast_decl_variable
     if (var_symbol.info.variable.is_global) {
         var_symbol.info.variable.stack_offset = 0; // Global variables don't use stack offset
     } else {
-        var_symbol.info.variable.stack_offset = analyzer.current_stack_offset;
-        analyzer.current_stack_offset += 8; // Assume 8 bytes per variable
+        // var_symbol.info.variable.stack_offset = analyzer.current_stack_offset;
+        // analyzer.current_stack_offset += 8; // Assume 8 bytes per variable
     }
 
     return symbol_table_add(analyzer, analyzer.current_scope, var_symbol);
@@ -424,9 +424,9 @@ bool analyze_identifier_expression(semantic_analyzer &analyzer, ast_expr_identif
     }
 
     // If not found in symbol table, check if it's a builtin procedure
-    if (is_builtin_procedure_call(analyzer, identifier->name, identifier->name_len)) {
-        return true;
-    }
+    // if (is_builtin_procedure_call(analyzer, identifier->name, identifier->name_len)) {
+    //     return true;
+    // }
 
     semantic_error_at_node(analyzer, "Undefined identifier", (ast_node *)identifier);
     return false;
@@ -451,7 +451,7 @@ ast_node *infer_expression_type(semantic_analyzer &analyzer, ast_node *expr) {
     switch (expr->type) {
     case ast_node_type::EXPR_LITERAL: {
         ast_expr_literal *lit = (ast_expr_literal *)expr;
-        ast_type_builtin *builtin = (ast_type_builtin *)alloc(*analyzer.allocator, sizeof(ast_type_builtin));
+        ast_type_builtin *builtin = (ast_type_builtin *)analyzer.allocator->alloc(sizeof(ast_type_builtin));
         if (!builtin) return nullptr;
 
         builtin->root = {.type = ast_node_type::TYPE_BUILTIN, .row = expr->row, .column = expr->column};
@@ -547,7 +547,7 @@ const char *symbol_type_to_string(symbol_type type) {
 }
 
 ast_node *create_builtin_type(semantic_analyzer &analyzer, builtin_type type) {
-    ast_type_builtin *builtin = (ast_type_builtin *)alloc(*analyzer.allocator, sizeof(ast_type_builtin));
+    ast_type_builtin *builtin = (ast_type_builtin *)analyzer.allocator->alloc(sizeof(ast_type_builtin));
     if (!builtin) return nullptr;
 
     builtin->root = {.type = ast_node_type::TYPE_BUILTIN, .row = 0, .column = 0};
@@ -559,8 +559,8 @@ ast_node *create_builtin_type(semantic_analyzer &analyzer, builtin_type type) {
 void register_builtin_procedures(semantic_analyzer &analyzer) {
     // Allocate space for builtin procedures
     analyzer.builtin_procedure_count = 2; // print and println
-    analyzer.builtin_procedures = (builtin_procedure *)alloc_array(*analyzer.allocator, sizeof(builtin_procedure),
-                                                                   analyzer.builtin_procedure_count);
+    analyzer.builtin_procedures = (builtin_procedure *)analyzer.allocator->alloc_array(
+        sizeof(builtin_procedure), analyzer.builtin_procedure_count);
 
     if (!analyzer.builtin_procedures) return;
 
@@ -569,7 +569,7 @@ void register_builtin_procedures(semantic_analyzer &analyzer) {
     ast_node *void_type = create_builtin_type(analyzer, builtin_type::VOID);
 
     // Register print procedure: print(message: str) -> void
-    ast_node **print_params = (ast_node **)alloc_array(*analyzer.allocator, sizeof(ast_node *), 1);
+    ast_node **print_params = (ast_node **)analyzer.allocator->alloc_array(sizeof(ast_node *), 1);
     if (print_params) {
         print_params[0] = str_type;
     }
@@ -581,7 +581,7 @@ void register_builtin_procedures(semantic_analyzer &analyzer) {
                                       .return_type = void_type};
 
     // Register println procedure: println(message: str) -> void
-    ast_node **println_params = (ast_node **)alloc_array(*analyzer.allocator, sizeof(ast_node *), 1);
+    ast_node **println_params = (ast_node **)analyzer.allocator->alloc_array(sizeof(ast_node *), 1);
     if (println_params) {
         println_params[0] = str_type;
     }
@@ -661,9 +661,9 @@ bool analyze_call_expression(semantic_analyzer &analyzer, ast_expr_call *call) {
     return true;
 }
 
-#include "ast.hpp"
-#include "semantic.hpp"
-#include <cstring>
+// #include "ast.hpp"
+// #include "semantic.hpp"
+// #include <cstring>
 
 // =============================================================================
 // MODULE REGISTRY MANAGEMENT
@@ -842,11 +842,11 @@ void exit_module_scope(semantic_analyzer &analyzer) {
 // USE DECLARATION PROCESSING
 // =============================================================================
 
-bool use_resolution_init(use_resolution &resolution, arena &memory) {
+bool use_resolution_init(use_resolution &resolution, arena_allocator &allocator) {
     resolution.capacity = 32;
     resolution.item_count = 0;
-    resolution.items = (use_resolution::resolved_item *)alloc_array(memory, sizeof(use_resolution::resolved_item),
-                                                                    resolution.capacity);
+    resolution.items = (use_resolution::resolved_item *)allocator.alloc_array(sizeof(use_resolution::resolved_item),
+                                                                              resolution.capacity);
     return resolution.items != nullptr;
 }
 
@@ -931,7 +931,7 @@ bool add_use_resolution(semantic_analyzer &analyzer, const char *local_name, u32
     use_resolution::resolved_item *item = &analyzer.current_uses.items[analyzer.current_uses.item_count++];
 
     // Copy local name
-    char *local_copy = (char *)alloc(*analyzer.allocator, local_name_len + 1);
+    char *local_copy = (char *)analyzer.allocator->alloc(local_name_len + 1);
     if (!local_copy) return false;
     strncpy(local_copy, local_name, local_name_len);
     local_copy[local_name_len] = '\0';
@@ -979,9 +979,10 @@ symbol *lookup_with_uses(semantic_analyzer &analyzer, const char *name, u32 name
 
 symbol *lookup_in_module(semantic_analyzer &analyzer, ast_decl_module *module, const char *name, u32 name_len) {
     // Find the module's symbol table
-    for (u32 i = 0; i < analyzer.modules.module_count; i++) {
-        module_registry::module_entry *entry = &analyzer.registry.modules[i];
-        if (entry->module_ast == module) {
+    for (u32 i = 0; i < analyzer.modules.modules.size; i++) {
+        // module_registry:: module_entry *entry = &analyzer.registry.modules[i];
+        module_info *entry = analyzer.modules.modules.get({i});
+        if (entry->ast_node == module) {
             return symbol_table_lookup(entry->symbols, name, name_len);
         }
     }
@@ -1052,7 +1053,7 @@ ast_decl_module *resolve_module_path(semantic_analyzer &analyzer, const char **p
 
 const char **append_to_path(semantic_analyzer &analyzer, const char **base_path, u32 base_len, const char *name,
                             u32 name_len) {
-    const char **new_path = (const char **)alloc_array(*analyzer.allocator, sizeof(const char *), base_len + 1);
+    const char **new_path = (const char **)analyzer.allocator->alloc_array(sizeof(const char *), base_len + 1);
     if (!new_path) return nullptr;
 
     // Copy base path
@@ -1061,7 +1062,7 @@ const char **append_to_path(semantic_analyzer &analyzer, const char **base_path,
     }
 
     // Copy new name
-    char *name_copy = (char *)alloc(*analyzer.allocator, name_len + 1);
+    char *name_copy = (char *)analyzer.allocator->alloc(name_len + 1);
     if (!name_copy) return nullptr;
     strncpy(name_copy, name, name_len);
     name_copy[name_len] = '\0';
@@ -1071,12 +1072,12 @@ const char **append_to_path(semantic_analyzer &analyzer, const char **base_path,
 }
 
 const char **copy_path(semantic_analyzer &analyzer, const char **path, u32 path_len) {
-    const char **copied = (const char **)alloc_array(*analyzer.allocator, sizeof(const char *), path_len);
+    const char **copied = (const char **)analyzer.allocator->alloc_array(sizeof(const char *), path_len);
     if (!copied) return nullptr;
 
     for (u32 i = 0; i < path_len; i++) {
         u32 len = strlen(path[i]);
-        char *segment_copy = (char *)alloc(*analyzer.allocator, len + 1);
+        char *segment_copy = (char *)analyzer.allocator->alloc(len + 1);
         if (!segment_copy) return nullptr;
         strcpy(segment_copy, path[i]);
         copied[i] = segment_copy;

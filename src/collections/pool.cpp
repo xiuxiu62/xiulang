@@ -1,7 +1,6 @@
 #include "allocators.hpp"
 #include "collections.hpp"
 #include "logger.hpp"
-#include <cstdlib>
 
 template <typename T> static bool maybe_resize(pool<T> &p);
 

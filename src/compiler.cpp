@@ -1,8 +1,8 @@
-#include "ast.hpp"
 #include "compiler.hpp"
+#include "allocators.hpp"
+#include "ast.hpp"
 #include "lexer.hpp"
 #include "logger.hpp"
-#include "memory.hpp"
 #include "parser.hpp"
 #include "semantic.hpp"
 #include "x86_generator.hpp"
@@ -52,7 +52,7 @@ compiler_result compile_from_string(compiler &c, const char *source_code, const 
     c.current_options = options;
 
     // Initialize memory
-    if (!init(c.allocator, megabytes(1))) {
+    if (!c.allocator.init(megabytes(1))) {
         return {false, "Failed to initialize memory arena", 0, 0};
     }
 

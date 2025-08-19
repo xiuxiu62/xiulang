@@ -1,8 +1,8 @@
 #pragma once
 
+#include "allocators.hpp"
 #include "collections.hpp"
 #include "defines.hpp"
-#include "memory.hpp"
 
 struct symbol;
 struct symbol_table;
@@ -58,7 +58,7 @@ struct use_resolution {
 
 struct module_registry {
     pool<module_info> modules;
-    arena_allocator *allocator;
+    block_allocator *allocator;
 
     u32 count() const;
 };
