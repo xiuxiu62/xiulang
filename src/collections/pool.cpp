@@ -1,14 +1,16 @@
+#include "allocators.hpp"
 #include "collections.hpp"
 #include "logger.hpp"
 #include <cstdlib>
 
 template <typename T> static bool maybe_resize(pool<T> &p);
 
-template <typename T> bool pool<T>::init(u32 initial_capacity) {
+template <typename T> bool pool<T>::init(block_allocator &allocator, u32 initial_capacity) {
     if (initial_capacity == 0) return false;
 
-    data = malloc(sizeof(T) * initial_capacity);
+    data = allocator.alloc(sizeof(T) * initial_capacity);
     if (!data) return false;
+    this->allocator = allocator;
 
     size = 0;
     capacity = initial_capacity;
@@ -17,8 +19,9 @@ template <typename T> bool pool<T>::init(u32 initial_capacity) {
 
 template <typename T> void pool<T>::deinit() {
     if (data) {
-        free(data);
+        allocator->dealloc(data);
         data = nullptr;
+        allocator = nullptr;
     }
     size = 0;
     capacity = 0;
@@ -45,7 +48,7 @@ template <typename T> static bool maybe_resize(pool<T> &p) {
     if (p.size < p.capacity) return true;
 
     u32 new_capacity = p.capacity * 2;
-    auto new_data = realloc(p.data, sizeof(T) * new_capacity);
+    void *new_data = p.allocator->realloc(p.data, sizeof(T) * new_capacity);
     if (!new_data) {
         error("Failed to resize pool");
         return false;

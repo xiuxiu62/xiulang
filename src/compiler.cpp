@@ -1,5 +1,5 @@
-#include "compiler.hpp"
 #include "ast.hpp"
+#include "compiler.hpp"
 #include "lexer.hpp"
 #include "logger.hpp"
 #include "memory.hpp"
@@ -52,7 +52,7 @@ compiler_result compile_from_string(compiler &c, const char *source_code, const 
     c.current_options = options;
 
     // Initialize memory
-    if (!arena_init(c.memory, megabytes(1))) {
+    if (!init(c.allocator, megabytes(1))) {
         return {false, "Failed to initialize memory arena", 0, 0};
     }
 
@@ -112,7 +112,7 @@ static bool lexical_analysis(compiler &c, const char *source) {
 static bool syntax_analysis(compiler &c) {
     if (c.current_options.verbose) info("🔍 Phase 2: Syntax Analysis");
 
-    if (!parser_init(c.parser, c.lexer, c.memory)) {
+    if (!parser_init(c.parser, c.lexer, c.allocator)) {
         error("Failed to initialize parser");
         return false;
     }
@@ -129,7 +129,7 @@ static bool syntax_analysis(compiler &c) {
 
     if (c.current_options.verbose) {
         info("✅ Syntax analysis completed");
-        arena_stats(c.memory);
+        stats(c.allocator);
     }
 
     return true;
@@ -138,7 +138,7 @@ static bool syntax_analysis(compiler &c) {
 static bool semantic_analysis(compiler &c) {
     if (c.current_options.verbose) info("🧠 Phase 2.5: Semantic Analysis");
 
-    if (!semantic_analyzer_init(c.analyzer, c.memory)) {
+    if (!semantic_analyzer_init(c.analyzer, c.allocator)) {
         error("Failed to initialize semantic analyzer");
         return false;
     }
@@ -166,7 +166,7 @@ static bool code_generation(compiler &c, const std::string &output_file) {
         return false;
     }
 
-    if (!x86_gen_init(c.generator, c.memory, asm_file)) {
+    if (!x86_gen_init(c.generator, c.allocator, asm_file)) {
         error("Failed to initialize code generator");
         fclose(asm_file);
         return false;
@@ -324,11 +324,11 @@ static std::string read_file(compiler &c, const std::string &filename) {
 }
 
 static void cleanup(compiler &c) {
-    if (c.memory.memory) {
+    if (c.allocator.memory) {
         x86_gen_deinit(c.generator);
         semantic_analyzer_deinit(c.analyzer);
         parser_deinit(c.parser);
-        arena_deinit(c.memory);
+        deinit(c.allocator);
     }
 
     // compiler_options saved_options = c.current_options;

@@ -42,7 +42,7 @@ enum class reg {
 };
 
 struct x86_generator {
-    arena *memory;
+    arena_allocator *memory;
     FILE *out_file;
 
     i32 stack_offset;  // Current stack pointer offset
@@ -52,7 +52,7 @@ struct x86_generator {
     bool in_procedure;
 };
 
-bool x86_gen_init(x86_generator &cg, arena &memory, FILE *out_file);
+bool x86_gen_init(x86_generator &cg, arena_allocator &memory, FILE *out_file);
 void x86_gen_deinit(x86_generator &codegen);
 
 bool generate_x86(x86_generator &codegen, ast_node *program);

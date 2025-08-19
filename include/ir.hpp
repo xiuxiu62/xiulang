@@ -3,10 +3,20 @@
 #include "collections.hpp"
 #include "defines.hpp"
 #include "memory.hpp"
-#include <map>
 
-struct semantic_analyzer;
 struct ast_node;
+struct hir_builder;
+struct hir_module;
+struct hir_procedure;
+struct hir_basic_block;
+struct lir_builder;
+struct lir_module;
+struct lir_procedure;
+struct lir_basic_block;
+
+// =================================================================
+// SHARED IR VALUE STRUCTURE
+// =================================================================
 
 enum class ir_value_kind : u32 {
     REGISTER,
@@ -55,308 +65,54 @@ struct ir_value {
             const char *name; // Variable name
         } stack_slot;
     };
+
+    // Comparison operator for use in hash maps
+    bool operator==(const ir_value &other) const;
+    u32 hash() const;
 };
 
-enum class hir_opcode : u32 {
-    // Arithmetic
-    ADD,
-    SUB,
-    MUL,
-    DIV,
-    MOD,
-    NEG,
-
-    // Comparison
-    EQ,
-    NE,
-    LT,
-    LE,
-    GT,
-    GE,
-
-    // Memory
-    LOAD,
-    STORE,
-    ALLOC,
-    DEALLOC,
-
-    // Control flow
-    BR,
-    BR_COND,
-    CALL,
-    RET,
-
-    // Language-specific
-    ARRAY_BOUNDS_CHECK,
-    NULL_CHECK,
-    OVERFLOW_CHECK,
-    CAST,
-
-    // High-level constructs
-    SLICE_CREATE,
-    STR_CONCAT,
-    STRUCT_ACCESS,
-
-    // Special
-    SIZEOF,
-    ALIGNOF,
-
-    CONST,
-    COPY,
-    NOP,
-};
-
-struct hir_instruction {
-    ir_value result;
-    ir_value operands[3];
-    u32 operand_count;
-    hir_opcode opcode;
-
-    ast_node *source_type;
-    ast_node *source_node;
-    bool can_overflow : 1;
-    bool is_counds_checked : 1;
-    const char *debug_info;
-
-    u32 source_line, source_column;
-};
-
-struct hir_basic_block {
-    u32 id;
-    const char *label;
-
-    pool<hir_instruction> instructions;
-
-    hir_basic_block *successor1; // For BR or true branch of BR_COND
-    hir_basic_block *successor2; // For false branch of BR_COND
-    pool<hir_basic_block *> predecessors;
-
-    bool visited;
-    bool is_entry;
-    bool is_exit;
-};
-
-struct hir_procedure {
-    const char *name;
-    ast_node *return_type;
-
-    pool<ir_value> parameters;
-
-    pool<hir_basic_block> basic_blocks;
-    hir_basic_block *entry_block;
-
-    u32 next_register_id;
-    u32 next_block_id;
-
-    u32 stack_size;
-    pool<ir_value> stack_slots;
-
-    bool is_builtin;
-    bool has_varargs;
-    ast_node *source_decl;
-};
-
-struct hir_pipeline {
-    const char *name;
-
-    pool<hir_procedure> procedures;
-    pool<ir_value> globals;
-    pool<ir_value> string_literals;
-
-    arena *allocator;
-    u32 next_string_id;
-};
-
-enum class lir_opcode : u32 {
-    // Machine arithmetic (size-specific)
-    ADD_I8,
-    ADD_I16,
-    ADD_I32,
-    ADD_I64,
-    SUB_I8,
-    SUB_I16,
-    SUB_I32,
-    SUB_I64,
-    MUL_I8,
-    MUL_I16,
-    MUL_I32,
-    MUL_I64,
-    // ... size-specific operations
-
-    // Machine comparisons
-    ICMP_EQ,
-    ICMP_NE,
-    ICMP_SLT,
-    ICMP_SGT, // Signed
-    ICMP_ULT,
-    ICMP_UGT, // Unsigned
-    FCMP_EQ,
-    FCMP_LT,
-    FCMP_GT, // Float
-
-    // Explicit memory operations
-    LOAD_I8,
-    LOAD_I16,
-    LOAD_I32,
-    LOAD_I64,
-    STORE_I8,
-    STORE_I16,
-    STORE_I32,
-    STORE_I64,
-
-    // Machine-level control flow
-    BR,
-    BR_COND,
-    CALL,
-    RET,
-
-    // Calling convention operations
-    PARAM_SETUP,  // Set up procedure parameters
-    CALL_PREP,    // Prepare for procedure call
-    CALL_CLEANUP, // Clean up after call
-
-    // Register operations
-    MOVE,   // Register-to-register copy
-    SPILL,  // Register to stack
-    RELOAD, // Stack to register
-
-    // Memory management
-    STACK_ALLOC, // Allocate stack space
-    HEAP_ALLOC,  // Allocate heap memory
-
-    // Platform-specific
-    SYSCALL,    // System call
-    INLINE_ASM, // Inline assembly
-};
-
-struct lir_instruction {
-    lir_opcode opcode;
-    ir_value result;
-    ir_value operands[3];
-    u32 operand_count;
-
-    // Low-level metadata
-    u32 instruction_size;     // Size in bytes for codegen
-    bool is_commutative;      // Can swap operands
-    bool clobbers_flags;      // Affects processor flags
-    const char *asm_template; // For assembly generation
-};
-
-struct lir_basic_block {
-    u32 id;
-    const char *label;
-
-    pool<lir_instruction> instructions;
-
-    lir_basic_block *successor1;
-    lir_basic_block *successor2;
-    pool<lir_basic_block *> predecessors;
-
-    bool visited;
-    bool is_entry;
-    bool is_exit;
-
-    pool<ir_value> live_in;  // Live registers at block entry
-    pool<ir_value> live_out; // Live registers at block exit
-};
-
-struct lir_procedure {
-    const char *name;
-    ast_node *return_type;
-
-    pool<ir_value> parameters;
-
-    pool<lir_basic_block> basic_blocks;
-    lir_basic_block *entry_block;
-
-    u32 next_virtual_register;
-    u32 next_block_id;
-    u32 total_stack_size;
-
-    u32 param_stack_size;
-    u32 local_stack_size;
-    u32 spill_stack_size;
-
-    bool uses_frame_pointer;
-    bool needs_stack_alignment;
-
-    hir_procedure *hir_source;
-};
-
-struct lir_pipeline {
-    const char *name;
-
-    pool<lir_procedure> procedures;
-    pool<ir_value> globals;
-    pool<ir_value> string_literals;
-
-    const char *target_triple;
-    u32 pointer_size;
-    u32 stack_alignment;
-
-    arena *allocator;
-
-    hir_pipeline *hir_source;
-};
-
-struct hir_builder {
-    hir_pipeline *pipeline;
-    hir_procedure *current_procedure;
-    hir_basic_block *current_block;
-
-    u32 next_temp_id;
-    arena *allocator;
-};
-
-struct lir_builder {
-    lir_pipeline *pipeline;
-    lir_procedure *current_procedure;
-    lir_basic_block *current_block;
-
-    u32 next_temp_id;
-    arena *allocator;
-};
+// =================================================================
+// IR PIPELINE COORDINATION
+// =================================================================
 
 struct ir_pipeline {
     arena *allocator;
 
-    struct hir_pipeline *hir_pipeline;
-    struct lir_pipeline *lir_pipeline;
+    hir_module *hir;
+    lir_module *lir;
 
     struct hir_builder *hir_builder;
     struct lir_builder *lir_builder;
 
+    // Lowering context for HIR -> LIR translation
     struct {
-        std::map<hir_procedure *, lir_procedure *> procedure_mapping;
-        std::map<hir_basic_block *, lir_basic_block *> block_mapping;
-        std::map<ir_value, ir_value> value_mapping;
+        hash_map<hir_procedure *, lir_procedure *> procedure_mapping;
+        hash_map<hir_basic_block *, lir_basic_block *> block_mapping;
+        hash_map<ir_value, ir_value> value_mapping; // HIR value -> LIR value
     } lowering_context;
+
+    // Compilation context
+    const char *source_file_path;
+    const char *target_triple;
+    bool debug_info_enabled;
 };
+
+// =================================================================
+// PIPELINE MANAGEMENT
+// =================================================================
 
 bool ir_pipeline_init(ir_pipeline &pipeline, arena &allocator);
 void ir_pipeline_deinit(ir_pipeline &pipeline);
 
-bool hir_pipeline_init(hir_pipeline &pipeline, arena &allocator, const char *name);
-void hir_pipeline_deinit(hir_pipeline &pipeline);
+// Set target-specific information
+void ir_pipeline_set_target(ir_pipeline &pipeline, const char *target_triple);
+void ir_pipeline_enable_debug_info(ir_pipeline &pipeline, bool enabled);
 
-bool lir_pipeline_init(lir_pipeline &pipeline, arena &allocator, const char *name);
-void lir_pipeline_deinit(lir_pipeline &pipeline);
+// =================================================================
+// SHARED IR VALUE FUNCTIONS
+// =================================================================
 
-bool hir_builder_init(hir_builder &builder, hir_pipeline &pipeline, arena &allocator);
-bool hir_builder_set_procedure(hir_builder &builder, hir_procedure &procedure);
-bool hir_builder_set_block(hir_builder &builder, hir_basic_block &block);
-
-bool lir_builder_init(lir_builder &builder, lir_pipeline &pipeline, arena &allocator);
-bool lir_builder_set_procedure(lir_builder &builder, lir_procedure &procedure);
-bool lir_builder_set_block(lir_builder &builder, lir_basic_block &block);
-
-hir_procedure *hir_create_procedure(hir_pipeline &pipeline, const char *name, ast_node *return_type);
-hir_basic_block *hir_create_basic_block(hir_procedure &procedure, const char *label);
-
-lir_procedure *lir_create_procedure(lir_pipeline &pipeline, const char *name, ast_node *return_type);
-lir_basic_block *lir_create_basic_block(lir_procedure &procedure, const char *label);
-
-// Shared between IR levels
+// Value creation (shared between HIR and LIR)
 ir_value ir_create_register(u32 id, ast_node *type, const char *debug_name = nullptr);
 ir_value ir_create_immediate_int(i64 value, ast_node *type);
 ir_value ir_create_immediate_float(f64 value, ast_node *type);
@@ -366,44 +122,114 @@ ir_value ir_create_global(const char *name, ast_node *type);
 ir_value ir_create_procedure_ref(const char *name, ast_node *type);
 ir_value ir_create_stack_slot(u32 offset, u32 size, const char *name, ast_node *type);
 
-ir_value hir_emit_binary(hir_builder &builder, hir_opcode op, ir_value left, ir_value right, ast_node *result);
-ir_value hir_emit_unary(hir_builder &builder, hir_opcode op, ir_value operand, ast_node *result_type);
-ir_value hir_emit_load(hir_builder &builder, ir_value address, ast_node *result_type);
-void hir_emit_store(hir_builder &builder, ir_value address, ir_value value);
-ir_value hir_emit_call(hir_builder &builder, ir_value function, ir_value *args, u32 arg_count, ast_node *result_type);
-void hir_emit_branch(hir_builder &builder, hir_basic_block *target);
-void hir_emit_branch_cond(hir_builder &builder, ir_value condition, hir_basic_block *true_target,
-                          hir_basic_block *false_target);
-void hir_emit_return(hir_builder &builder, ir_value value);
-
-ir_value lir_emit_binary(lir_builder &builder, lir_opcode op, ir_value left, ir_value right, ast_node *result_type);
-ir_value lir_emit_unary(lir_builder &builder, lir_opcode op, ir_value operand, ast_node *result_type);
-ir_value lir_emit_load(lir_builder &builder, ir_value address, ast_node *result_type);
-void lir_emit_store(lir_builder &builder, ir_value address, ir_value value);
-void lir_emit_branch(lir_builder &builder, lir_basic_block *target);
-void lir_emit_branch_cond(lir_builder &builder, ir_value condition, lir_basic_block *true_target,
-                          lir_basic_block *false_target);
-void lir_emit_return(lir_builder &builder, ir_value value);
-
-// IR lowering
-lir_pipeline *lower_hir_to_lir(ir_pipeline &pipeline, hir_pipeline *hir);
-lir_procedure *lower_hir_procedure_to_lir(ir_pipeline &pipeline, hir_procedure *hir_func);
-lir_basic_block *lower_hir_block_to_lir(ir_pipeline &pipeline, hir_basic_block *hir_block);
-ir_value lower_hir_instruction_to_lir(ir_pipeline &pipeline, hir_instruction *hir_instr);
-
-const char *hir_opcode_to_string(hir_opcode op);
-const char *lir_opcode_to_string(lir_opcode op);
+// Value utilities
 bool ir_value_equals(const ir_value &a, const ir_value &b);
-bool ir_instruction_is_terminator(hir_opcode op);
-bool ir_instruction_is_terminator(lir_opcode op);
+bool ir_value_is_constant(const ir_value &value);
+bool ir_value_is_register(const ir_value &value);
+bool ir_value_is_memory(const ir_value &value);
+
+// Type queries
+bool ir_value_type_is_integer(const ir_value &value);
+bool ir_value_type_is_float(const ir_value &value);
+bool ir_value_type_is_pointer(const ir_value &value);
+u32 ir_value_get_size_bytes(const ir_value &value);
 
 // Debug/printing
-void hir_print_instruction(const hir_instruction &instr);
-void hir_print_basic_block(const hir_basic_block &block);
-void hir_print_function(const hir_procedure &procedure);
-void hir_print(const hir_pipeline &pipeline);
+void ir_print_value(const ir_value &value);
+const char *ir_value_kind_to_string(ir_value_kind kind);
 
-void lir_print_instruction(const lir_instruction &instr);
-void lir_print_basic_block(const lir_basic_block &block);
-void lir_print_function(const lir_procedure &procedure);
-void lir_print(const lir_pipeline &pipeline);
+// =================================================================
+// COMPILE-TIME VALUE REPRESENTATION
+// =================================================================
+
+enum class compile_time_value_kind : u32 {
+    INTEGER,
+    FLOAT,
+    BOOLEAN,
+    STRING,
+    NULL_PTR,
+    UNDEFINED,
+};
+
+struct compile_time_value {
+    compile_time_value_kind kind;
+    ast_node *type;
+
+    union {
+        i64 int_value;
+        f64 float_value;
+        bool bool_value;
+        const char *string_value;
+    };
+
+    bool is_valid() const {
+        return kind != compile_time_value_kind::UNDEFINED;
+    }
+};
+
+// Compile-time value operations
+compile_time_value create_compile_time_int(i64 value, ast_node *type);
+compile_time_value create_compile_time_float(f64 value, ast_node *type);
+compile_time_value create_compile_time_bool(bool value, ast_node *type);
+compile_time_value create_compile_time_string(const char *value, ast_node *type);
+compile_time_value create_compile_time_null(ast_node *type);
+
+bool compile_time_values_equal(const compile_time_value &a, const compile_time_value &b);
+ir_value compile_time_value_to_ir_value(const compile_time_value &value);
+
+// =================================================================
+// FORWARD DECLARATIONS FOR HIR/LIR COORDINATION
+// =================================================================
+
+// These are implemented in their respective modules
+
+// HIR/LIR lowering (implemented in hir_to_lir.cpp)
+lir_module *lower_hir_to_lir(ir_pipeline &pipeline, hir_module *hir);
+lir_procedure *lower_hir_procedure_to_lir(ir_pipeline &pipeline, hir_procedure *hir_proc);
+lir_basic_block *lower_hir_block_to_lir(ir_pipeline &pipeline, hir_basic_block *hir_block);
+ir_value lower_hir_value_to_lir(ir_pipeline &pipeline, ir_value hir_value);
+
+// Register lowering context mappings
+void register_procedure_mapping(ir_pipeline &pipeline, hir_procedure *hir_proc, lir_procedure *lir_proc);
+void register_block_mapping(ir_pipeline &pipeline, hir_basic_block *hir_block, lir_basic_block *lir_block);
+void register_value_mapping(ir_pipeline &pipeline, ir_value hir_value, ir_value lir_value);
+
+// Lookup lowering mappings
+lir_procedure *lookup_procedure_mapping(ir_pipeline &pipeline, hir_procedure *hir_proc);
+lir_basic_block *lookup_block_mapping(ir_pipeline &pipeline, hir_basic_block *hir_block);
+ir_value lookup_value_mapping(ir_pipeline &pipeline, ir_value hir_value);
+
+// =================================================================
+// UTILITY MACROS
+// =================================================================
+
+// For creating temporary register names
+#define IR_TEMP_NAME(prefix, id) arena_printf(*pipeline.allocator, "%s%u", prefix, id)
+
+// For type-safe value creation
+#define IR_REG(id, type) ir_create_register(id, type, nullptr)
+#define IR_IMM_INT(val, type) ir_create_immediate_int(val, type)
+#define IR_IMM_FLOAT(val, type) ir_create_immediate_float(val, type)
+#define IR_IMM_BOOL(val, type) ir_create_immediate_bool(val, type)
+
+// =================================================================
+// VALIDATION AND DEBUGGING
+// =================================================================
+
+// IR validation
+bool validate_ir_value(const ir_value &value);
+bool validate_ir_pipeline(const ir_pipeline &pipeline);
+
+// Debug statistics
+struct ir_statistics {
+    u32 total_hir_instructions;
+    u32 total_lir_instructions;
+    u32 total_hir_blocks;
+    u32 total_lir_blocks;
+    u32 total_hir_procedures;
+    u32 total_lir_procedures;
+    u32 expansion_ratio; // LIR instructions / HIR instructions * 100
+};
+
+ir_statistics compute_ir_statistics(const ir_pipeline &pipeline);
+void print_ir_statistics(const ir_statistics &stats);

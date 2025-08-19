@@ -47,7 +47,7 @@ struct symbol_table {
 };
 
 struct semantic_analyzer {
-    arena *allocator;
+    arena_allocator *allocator;
     symbol_table *current_scope;
     symbol_table *global_scope;
 
@@ -74,7 +74,7 @@ struct semantic_analyzer {
     use_resolution current_uses;
 };
 
-bool semantic_analyzer_init(semantic_analyzer &analyzer, arena &allocator);
+bool semantic_analyzer_init(semantic_analyzer &analyzer, arena_allocator &allocator);
 void semantic_analyzer_deinit(semantic_analyzer &analyzer);
 bool analyze(semantic_analyzer &analyzer, ast_node *program);
 

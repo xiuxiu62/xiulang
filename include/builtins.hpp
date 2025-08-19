@@ -1,8 +1,8 @@
 #pragma once
 
+#include "allocators.hpp"
 #include "ast.hpp"
 #include "collections.hpp"
-#include "memory.hpp"
 
 struct ast_node;
 struct ast_expr_call;
@@ -63,10 +63,10 @@ builtin_procedure *find_builtin_procedure_by_name(builtin_registry &registry, co
 bool is_builtin_procedure_call(builtin_registry &registry, const char *name, u32 name_len);
 
 // Type creation
-ast_node *create_builtin_type(arena &memory, builtin_type type);
+ast_node *create_builtin_type(arena_allocator &allocator, builtin_type type);
 
 // Registration
-void register_default_builtins(builtin_registry &registry, arena &memory);
+void register_default_builtins(builtin_registry &registry, arena_allocator &allocator);
 
 // Category helpers
 constexpr bool is_intrinsic_builtin(const builtin_procedure &builtin) {
@@ -83,4 +83,4 @@ constexpr bool will_move_to_stdlib(const builtin_procedure &builtin) {
 
 // Analysis helpers
 bool validate_builtin_call(builtin_registry &registry, ast_expr_call *call);
-ast_node *get_builtin_return_type(builtin_registry &registry, const builtin_procedure &builtin, ast_expr_call *call);
+st_node *get_builtin_return_type(builtin_registry &registry, const builtin_procedure &builtin, ast_expr_call *call);

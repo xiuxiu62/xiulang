@@ -28,7 +28,7 @@ struct compiler_result {
 };
 
 struct compiler {
-    arena memory = {};
+    arena allocator = {};
     struct lexer lexer = {};
     struct parser parser = {};
     semantic_analyzer analyzer = {};

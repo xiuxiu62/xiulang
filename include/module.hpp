@@ -58,12 +58,12 @@ struct use_resolution {
 
 struct module_registry {
     pool<module_info> modules;
-    arena *allocator;
+    arena_allocator *allocator;
 
     u32 count() const;
 };
 
-bool module_registry_init(module_registry &registry, arena &allocator);
+bool module_registry_init(module_registry &registry, arena_allocator &allocator);
 void module_registry_deinit(module_registry &registry);
 
 u32 module_count(const module_registry &registry);

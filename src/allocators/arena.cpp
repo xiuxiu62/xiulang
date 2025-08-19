@@ -1,4 +1,4 @@
-#include "memory.hpp"
+#include "allocators.hpp"
 #include "defines.hpp"
 #include "logger.hpp"
 #include <cstdlib>
@@ -8,37 +8,37 @@
 
 static u32 align_size(u32 size, u32 alignment);
 
-bool arena_init(arena &a, u32 size) {
-    if (a.memory) {
+bool arena_allocator::init(u32 size) {
+    if (memory) {
         warn("Arena already initialized");
         return false;
     }
 
-    auto memory = calloc(size, 1);
+    void *memory = calloc(size, 1);
     if (!memory) {
         error("Failed to allocate %u bytes for arena", size);
-        a.size = 0;
+        this->size = 0;
         return false;
     }
 
-    a.memory = (char *)memory;
-    a.size = size;
-    a.used = 0;
+    memory = (char *)memory;
+    this->size = size;
+    used = 0;
 
     return true;
 }
 
-void arena_deinit(arena &a) {
-    if (a.memory) {
-        free(a.memory);
-        a.memory = nullptr;
+void arena_allocator::deinit() {
+    if (memory) {
+        free(memory);
+        memory = nullptr;
     }
-    a.size = 0;
-    a.used = 0;
+    size = 0;
+    used = 0;
 }
 
-void *arena_alloc(arena &a, u32 size) {
-    if (!a.memory) {
+void *arena_allocator::alloc(u32 size) {
+    if (!memory) {
         error("Arena not initialized");
         return nullptr;
     }
@@ -50,18 +50,18 @@ void *arena_alloc(arena &a, u32 size) {
 
     u32 aligned_size = align_size(size, ARENA_ALIGNMENT);
 
-    if (a.used + aligned_size > a.size) {
+    if (used + aligned_size > this->size) {
         error("Arena out of memory: requested %u bytes (aligned to %u), but only %lu bytes available", size,
-              aligned_size, a.size - a.used);
+              aligned_size, this->size - used);
         return nullptr;
     }
 
-    void *ptr = a.memory + a.used;
-    a.used += aligned_size;
+    void *ptr = memory + used;
+    used += aligned_size;
     return ptr;
 }
 
-void *arena_alloc_array(arena &a, u32 size, u32 count) {
+void *arena_allocator::alloc_array(u32 size, u32 count) {
     if (count == 0) {
         warn("Attempted to allocate array with 0 elements");
         return nullptr;
@@ -72,27 +72,27 @@ void *arena_alloc_array(arena &a, u32 size, u32 count) {
         return nullptr;
     }
 
-    return arena_alloc(a, size * count);
+    return alloc(size * count);
 }
 
-void arena_reset(arena &a) {
-    if (!a.memory) {
+void arena_allocator::reset() {
+    if (!memory) {
         warn("Attempted to reset uninitialized arena");
         return;
     }
 
-    a.used = 0;
-    memset(a.memory, 0, a.size);
+    used = 0;
+    memset(memory, 0, size);
 }
 
-void arena_stats(const arena &a) {
-    if (!a.memory) {
+void arena_allocator::stats() const {
+    if (!memory) {
         info("Arena not initialized");
         return;
     }
 
-    f64 usage_percentage = (f64)a.used / a.size * 100.0;
-    info("Arena stats: %lu/%lu bytes used (%.1f%%)", a.used, a.size, usage_percentage);
+    f64 usage_percentage = (f64)used / size * 100.0;
+    info("Arena stats: %lu/%lu bytes used (%.1f%%)", used, size, usage_percentage);
 }
 
 static u32 align_size(u32 size, u32 alignment) {

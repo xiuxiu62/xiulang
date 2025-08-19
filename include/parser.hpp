@@ -6,7 +6,7 @@
 
 struct parser {
     struct lexer *lexer = nullptr;
-    arena *memory = nullptr;
+    arena_allocator *memory = nullptr;
     token current_token = {};
     bool has_error = false;
 
@@ -16,7 +16,7 @@ struct parser {
     } error;
 };
 
-bool parser_init(struct parser &parser, struct lexer &lexer, arena &memory);
+bool parser_init(struct parser &parser, struct lexer &lexer, arena_allocator &memory);
 void parser_deinit(struct parser &parser);
 void parser_reset(struct parser &parser);
 ast_node *parse_program(parser &p);
