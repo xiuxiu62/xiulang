@@ -1,10 +1,11 @@
 #include "builtins.hpp"
 #include "ast.hpp"
-#include "memory.hpp"
+#include "logger.hpp"
 #include <cstring>
 
 bool builtin_registry_init(builtin_registry &registry) {
-    return registry.builtins.init(32); // Increased capacity for more builtins
+    unimplemented();
+    // return registry.builtins.init(32); // Increased capacity for more builtins
 }
 
 void builtin_registry_deinit(builtin_registry &registry) {
@@ -34,8 +35,8 @@ bool is_builtin_procedure_call(builtin_registry &registry, const char *name, u32
     return find_builtin_procedure_by_name(registry, name, name_len) != nullptr;
 }
 
-ast_node *create_builtin_type(arena &memory, builtin_type type) {
-    ast_type_builtin *builtin = (ast_type_builtin *)arena_alloc(memory, sizeof(ast_type_builtin));
+ast_node *create_builtin_type(arena_allocator &allocator, builtin_type type) {
+    ast_type_builtin *builtin = (ast_type_builtin *)allocator.alloc(sizeof(ast_type_builtin));
     if (!builtin) return nullptr;
 
     builtin->root = {.type = ast_node_type::TYPE_BUILTIN, .row = 0, .column = 0};
@@ -45,22 +46,22 @@ ast_node *create_builtin_type(arena &memory, builtin_type type) {
 }
 
 // Helper function to create parameter arrays
-static ast_node **create_param_array(arena &memory, u32 count) {
+static ast_node **create_param_array(arena_allocator &allocator, u32 count) {
     if (count == 0) return nullptr;
-    return (ast_node **)arena_alloc_array(memory, sizeof(ast_node *), count);
+    return (ast_node **)allocator.alloc_array(sizeof(ast_node *), count);
 }
 
-void register_default_builtins(builtin_registry &registry, arena &memory) {
+void register_default_builtins(builtin_registry &registry, arena_allocator &allocator) {
     // Create common types
-    ast_node *void_type = create_builtin_type(memory, builtin_type::VOID);
-    ast_node *bool_type = create_builtin_type(memory, builtin_type::BOOL);
-    ast_node *char_type = create_builtin_type(memory, builtin_type::CHAR);
-    ast_node *str_type = create_builtin_type(memory, builtin_type::STR);
-    ast_node *u8_type = create_builtin_type(memory, builtin_type::U8);
-    ast_node *u32_type = create_builtin_type(memory, builtin_type::U32);
-    ast_node *u64_type = create_builtin_type(memory, builtin_type::U64);
-    ast_node *usize_type = create_builtin_type(memory, builtin_type::USIZE);
-    ast_node *s32_type = create_builtin_type(memory, builtin_type::S32);
+    ast_node *void_type = create_builtin_type(allocator, builtin_type::VOID);
+    ast_node *bool_type = create_builtin_type(allocator, builtin_type::BOOL);
+    ast_node *char_type = create_builtin_type(allocator, builtin_type::CHAR);
+    ast_node *str_type = create_builtin_type(allocator, builtin_type::STR);
+    ast_node *u8_type = create_builtin_type(allocator, builtin_type::U8);
+    ast_node *u32_type = create_builtin_type(allocator, builtin_type::U32);
+    ast_node *u64_type = create_builtin_type(allocator, builtin_type::U64);
+    ast_node *usize_type = create_builtin_type(allocator, builtin_type::USIZE);
+    ast_node *s32_type = create_builtin_type(allocator, builtin_type::S32);
 
     // =================================================================
     // COMPILER INTRINSICS - Always stay as builtins
@@ -95,7 +96,7 @@ void register_default_builtins(builtin_registry &registry, arena &memory) {
     register_builtin(registry, alignof_proc);
 
     // compile_error(message: str) -> never
-    ast_node **compile_error_params = create_param_array(memory, 1);
+    ast_node **compile_error_params = create_param_array(allocator, 1);
     if (compile_error_params) {
         compile_error_params[0] = str_type;
     }
@@ -117,7 +118,7 @@ void register_default_builtins(builtin_registry &registry, arena &memory) {
     // =================================================================
 
     // alloc(size: usize) -> *u8
-    ast_node **alloc_params = create_param_array(memory, 1);
+    ast_node **alloc_params = create_param_array(allocator, 1);
     if (alloc_params) {
         alloc_params[0] = usize_type;
     }
@@ -136,7 +137,7 @@ void register_default_builtins(builtin_registry &registry, arena &memory) {
     register_builtin(registry, alloc_proc);
 
     // dealloc(ptr: *u8) -> void
-    ast_node **dealloc_params = create_param_array(memory, 1);
+    ast_node **dealloc_params = create_param_array(allocator, 1);
     if (dealloc_params) {
         dealloc_params[0] = u8_type; // Should be *u8
     }
@@ -154,7 +155,7 @@ void register_default_builtins(builtin_registry &registry, arena &memory) {
     register_builtin(registry, dealloc_proc);
 
     // panic(message: str) -> never
-    ast_node **panic_params = create_param_array(memory, 1);
+    ast_node **panic_params = create_param_array(allocator, 1);
     if (panic_params) {
         panic_params[0] = str_type;
     }
@@ -172,7 +173,7 @@ void register_default_builtins(builtin_registry &registry, arena &memory) {
     register_builtin(registry, panic_proc);
 
     // assert(condition: bool, message: str) -> void
-    ast_node **assert_params = create_param_array(memory, 2);
+    ast_node **assert_params = create_param_array(allocator, 2);
     if (assert_params) {
         assert_params[0] = bool_type;
         assert_params[1] = str_type;
@@ -195,7 +196,7 @@ void register_default_builtins(builtin_registry &registry, arena &memory) {
     // =================================================================
 
     // print(message: str) -> void
-    ast_node **print_params = create_param_array(memory, 1);
+    ast_node **print_params = create_param_array(allocator, 1);
     if (print_params) {
         print_params[0] = str_type;
     }
@@ -213,7 +214,7 @@ void register_default_builtins(builtin_registry &registry, arena &memory) {
     register_builtin(registry, print_proc);
 
     // println(message: str) -> void
-    ast_node **println_params = create_param_array(memory, 1);
+    ast_node **println_params = create_param_array(allocator, 1);
     if (println_params) {
         println_params[0] = str_type;
     }
@@ -231,7 +232,7 @@ void register_default_builtins(builtin_registry &registry, arena &memory) {
     register_builtin(registry, println_proc);
 
     // file_open(path: str, mode: str) -> s32 (file handle)
-    ast_node **file_open_params = create_param_array(memory, 2);
+    ast_node **file_open_params = create_param_array(allocator, 2);
     if (file_open_params) {
         file_open_params[0] = str_type;
         file_open_params[1] = str_type;
@@ -250,7 +251,7 @@ void register_default_builtins(builtin_registry &registry, arena &memory) {
     register_builtin(registry, file_open_proc);
 
     // file_close(handle: s32) -> void
-    ast_node **file_close_params = create_param_array(memory, 1);
+    ast_node **file_close_params = create_param_array(allocator, 1);
     if (file_close_params) {
         file_close_params[0] = s32_type;
     }
@@ -268,7 +269,7 @@ void register_default_builtins(builtin_registry &registry, arena &memory) {
     register_builtin(registry, file_close_proc);
 
     // str_len(s: str) -> usize
-    ast_node **str_len_params = create_param_array(memory, 1);
+    ast_node **str_len_params = create_param_array(allocator, 1);
     if (str_len_params) {
         str_len_params[0] = str_type;
     }

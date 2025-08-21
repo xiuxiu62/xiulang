@@ -997,3 +997,22 @@ static const char *reg_name_for_type(reg r, builtin_type type) {
         return reg_name_64(r);
     }
 }
+
+const char *binary_op_to_string(binary_op op) {
+    switch (op) {
+    case binary_op::ADD:
+        return "+";
+    case binary_op::SUB:
+        return "-";
+    case binary_op::MUL:
+        return "*";
+    case binary_op::DIV:
+        return "/";
+    case binary_op::EQ:
+        return "==";
+    case binary_op::NE:
+        return "!=";
+    default:
+        return "?";
+    }
+}

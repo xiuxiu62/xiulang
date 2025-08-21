@@ -35,12 +35,6 @@ struct module_info {
     pool_handle parent;
 };
 
-// struct use_info {
-//     symbol_table *symbols;
-//     symbol *target_symbol;
-//     bool is_fully_imported;
-// };
-
 struct use_resolution {
     struct resolved_item {
         const char *local_name;
@@ -58,7 +52,7 @@ struct use_resolution {
 
 struct module_registry {
     pool<module_info> modules;
-    block_allocator *allocator;
+    arena_allocator *allocator;
 
     u32 count() const;
 };

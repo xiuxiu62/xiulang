@@ -1,7 +1,7 @@
+#include "parser.hpp"
+#include "allocators.hpp"
 #include "ast.hpp"
 #include "lexer.hpp"
-#include "memory.hpp"
-#include "parser.hpp"
 #include "token.hpp"
 #include <cstring>
 
@@ -60,9 +60,9 @@ static bool parse_use_item(parser &p, ast_decl_use::use_item *item);
 static ast_node *parse_use_declaration(parser &p);
 static ast_node *parse_member_access(parser &p, ast_node *left);
 
-bool parser_init(parser &p, struct lexer &lexer, arena &memory) {
+bool parser_init(parser &p, struct lexer &lexer, arena_allocator &allocator) {
     p.lexer = &lexer;
-    p.memory = &memory;
+    p.allocator = &allocator;
     p.has_error = false;
     p.error = {.message = nullptr, .row = 0, .column = 0};
 
@@ -74,7 +74,7 @@ void parser_deinit(parser &p) {
 }
 
 void parser_reset(parser &p) {
-    reset(*p.memory);
+    p.allocator->reset();
     p.has_error = false;
     p.error = {.message = nullptr, .row = 0, .column = 0};
 }
@@ -154,7 +154,7 @@ static ast_node *parse_translation_unit(parser &p) {
     u32 declaration_count = 0;
     u32 declaration_capacity = 16;
 
-    declarations = (ast_node **)alloc_array(*p.memory, sizeof(ast_node *), declaration_capacity);
+    declarations = (ast_node **)p.allocator->alloc_array(sizeof(ast_node *), declaration_capacity);
     if (!declarations) {
         parser_error(p, "Failed to allocate memory for declarations");
         return nullptr;
@@ -173,7 +173,7 @@ static ast_node *parse_translation_unit(parser &p) {
                 // Reallocate if needed
                 declaration_capacity *= 2;
                 ast_node **new_declarations =
-                    (ast_node **)alloc_array(*p.memory, sizeof(ast_node *), declaration_capacity);
+                    (ast_node **)p.allocator->alloc_array(sizeof(ast_node *), declaration_capacity);
                 if (!new_declarations) {
                     parser_error(p, "Failed to reallocate memory for declarations");
                     break;
@@ -192,7 +192,7 @@ static ast_node *parse_translation_unit(parser &p) {
         }
     }
 
-    ast_translation_unit *unit = (ast_translation_unit *)alloc(*p.memory, sizeof(ast_translation_unit));
+    ast_translation_unit *unit = (ast_translation_unit *)p.allocator->alloc(sizeof(ast_translation_unit));
     if (!unit) {
         parser_error(p, "Failed to allocate memory for translation unit");
         return nullptr;
@@ -265,7 +265,7 @@ static ast_node *parse_variable_declaration(parser &p, const char *name, u32 nam
     parser_match(p, token_type::SEMICOLON);
 
     // Create variable declaration
-    ast_decl_variable *var_decl = (ast_decl_variable *)alloc(*p.memory, sizeof(ast_decl_variable));
+    ast_decl_variable *var_decl = (ast_decl_variable *)p.allocator->alloc(sizeof(ast_decl_variable));
     if (!var_decl) return nullptr;
 
     var_decl->root.type = ast_node_type::DECL_VARIABLE;
@@ -310,7 +310,7 @@ static ast_node *parse_procedure_declaration(parser &p, const char *name, u32 na
         has_explicit_return_type = true;
     } else {
         // Default to void if no return type specified
-        ast_type_builtin *void_type = (ast_type_builtin *)alloc(*p.memory, sizeof(ast_type_builtin));
+        ast_type_builtin *void_type = (ast_type_builtin *)p.allocator->alloc(sizeof(ast_type_builtin));
         if (!void_type) return nullptr;
         void_type->root = {
             .type = ast_node_type::TYPE_BUILTIN, .row = p.current_token.row, .column = p.current_token.column};
@@ -326,7 +326,7 @@ static ast_node *parse_procedure_declaration(parser &p, const char *name, u32 na
     }
 
     // Create procedure declaration
-    ast_decl_procedure *proc_decl = (ast_decl_procedure *)alloc(*p.memory, sizeof(ast_decl_procedure));
+    ast_decl_procedure *proc_decl = (ast_decl_procedure *)p.allocator->alloc(sizeof(ast_decl_procedure));
     if (!proc_decl) return nullptr;
 
     proc_decl->root = {
@@ -390,7 +390,7 @@ static ast_node *parse_type_specifier(parser &p) {
     parser_advance(p);
 
     // Create builtin type node
-    ast_type_builtin *builtin = (ast_type_builtin *)alloc(*p.memory, sizeof(ast_type_builtin));
+    ast_type_builtin *builtin = (ast_type_builtin *)p.allocator->alloc(sizeof(ast_type_builtin));
     if (!builtin) return nullptr;
 
     builtin->root = {.type = ast_node_type::TYPE_BUILTIN, .row = line, .column = col};
@@ -402,7 +402,7 @@ static ast_node *parse_type_specifier(parser &p) {
 static bool parse_parameter_list(parser &p, ast_parameter **params, u32 *param_count) {
     // New syntax: (name: type, name2: type)
     u32 capacity = 8;
-    ast_parameter *parameters = (ast_parameter *)alloc_array(*p.memory, sizeof(ast_parameter), capacity);
+    ast_parameter *parameters = (ast_parameter *)p.allocator->alloc_array(sizeof(ast_parameter), capacity);
     if (!parameters) return false;
 
     u32 count = 0;
@@ -498,7 +498,7 @@ static ast_node *parse_compound_statement(parser &p) {
     u32 statement_count = 0;
     u32 statement_capacity = 32;
 
-    statements = (ast_node **)alloc_array(*p.memory, sizeof(ast_node *), statement_capacity);
+    statements = (ast_node **)p.allocator->alloc_array(sizeof(ast_node *), statement_capacity);
     if (!statements) {
         parser_error(p, "Failed to allocate memory for statements");
         return nullptr;
@@ -529,7 +529,7 @@ static ast_node *parse_compound_statement(parser &p) {
     parser_consume(p, token_type::RIGHT_BRACE, "Expected '}'");
     if (p.has_error) return nullptr;
 
-    ast_stmt_compound *compound = (ast_stmt_compound *)alloc(*p.memory, sizeof(ast_stmt_compound));
+    ast_stmt_compound *compound = (ast_stmt_compound *)p.allocator->alloc(sizeof(ast_stmt_compound));
     if (!compound) return nullptr;
 
     compound->root = {.type = ast_node_type::STMT_COMPOUND, .row = line, .column = col};
@@ -559,7 +559,7 @@ static ast_node *parse_if_statement(parser &p) {
         if (!else_stmt) return nullptr;
     }
 
-    ast_stmt_if *if_stmt = (ast_stmt_if *)alloc(*p.memory, sizeof(ast_stmt_if));
+    ast_stmt_if *if_stmt = (ast_stmt_if *)p.allocator->alloc(sizeof(ast_stmt_if));
     if (!if_stmt) return nullptr;
 
     if_stmt->root = {.type = ast_node_type::STMT_IF, .row = line, .column = col};
@@ -589,7 +589,7 @@ static ast_node *parse_return_statement(parser &p) {
     // Semicolons are optional
     parser_match(p, token_type::SEMICOLON);
 
-    ast_stmt_return *ret = (ast_stmt_return *)alloc(*p.memory, sizeof(ast_stmt_return));
+    ast_stmt_return *ret = (ast_stmt_return *)p.allocator->alloc(sizeof(ast_stmt_return));
     if (!ret) return nullptr;
 
     ret->root = {.type = ast_node_type::STMT_RETURN, .row = line, .column = col};
@@ -605,7 +605,7 @@ static ast_node *parse_expression_statement(parser &p) {
     // Semicolons are optional in new language
     parser_match(p, token_type::SEMICOLON);
 
-    ast_stmt_expression *expr_stmt = (ast_stmt_expression *)alloc(*p.memory, sizeof(ast_stmt_expression));
+    ast_stmt_expression *expr_stmt = (ast_stmt_expression *)p.allocator->alloc(sizeof(ast_stmt_expression));
     if (!expr_stmt) return nullptr;
 
     expr_stmt->root = {.type = ast_node_type::STMT_EXPRESSION, .row = expr->row, .column = expr->column};
@@ -628,7 +628,7 @@ static ast_node *parse_while_statement(parser &p) {
     ast_node *body = parse_statement(p);
     if (!body) return nullptr;
 
-    ast_stmt_while *while_stmt = (ast_stmt_while *)alloc(*p.memory, sizeof(ast_stmt_while));
+    ast_stmt_while *while_stmt = (ast_stmt_while *)p.allocator->alloc(sizeof(ast_stmt_while));
     if (!while_stmt) return nullptr;
 
     while_stmt->root = {.type = ast_node_type::STMT_WHILE, .row = line, .column = col};
@@ -660,7 +660,7 @@ static ast_node *parse_logical_or(parser &p) {
         binary_op op = binary_op::LOGICAL_OR;
         ast_node *right = parse_logical_and(p);
 
-        ast_expr_binary *binary = (ast_expr_binary *)alloc(*p.memory, sizeof(ast_expr_binary));
+        ast_expr_binary *binary = (ast_expr_binary *)p.allocator->alloc(sizeof(ast_expr_binary));
         if (!binary) return nullptr;
 
         binary->root = {.type = ast_node_type::EXPR_BINARY, .row = expr->row, .column = expr->column};
@@ -681,7 +681,7 @@ static ast_node *parse_logical_and(parser &p) {
         binary_op op = binary_op::LOGICAL_AND;
         ast_node *right = parse_equality(p);
 
-        ast_expr_binary *binary = (ast_expr_binary *)alloc(*p.memory, sizeof(ast_expr_binary));
+        ast_expr_binary *binary = (ast_expr_binary *)p.allocator->alloc(sizeof(ast_expr_binary));
         if (!binary) return nullptr;
 
         binary->root = {.type = ast_node_type::EXPR_BINARY, .row = expr->row, .column = expr->column};
@@ -704,7 +704,7 @@ static ast_node *parse_equality(parser &p) {
 
         ast_node *right = parse_relational(p);
 
-        ast_expr_binary *binary = (ast_expr_binary *)alloc(*p.memory, sizeof(ast_expr_binary));
+        ast_expr_binary *binary = (ast_expr_binary *)p.allocator->alloc(sizeof(ast_expr_binary));
         if (!binary) return nullptr;
 
         binary->root = {.type = ast_node_type::EXPR_BINARY, .row = expr->row, .column = expr->column};
@@ -736,7 +736,7 @@ static ast_node *parse_relational(parser &p) {
 
         ast_node *right = parse_additive(p);
 
-        ast_expr_binary *binary = (ast_expr_binary *)alloc(*p.memory, sizeof(ast_expr_binary));
+        ast_expr_binary *binary = (ast_expr_binary *)p.allocator->alloc(sizeof(ast_expr_binary));
         if (!binary) return nullptr;
 
         binary->root = {.type = ast_node_type::EXPR_BINARY, .row = expr->row, .column = expr->column};
@@ -759,7 +759,7 @@ static ast_node *parse_additive(parser &p) {
 
         ast_node *right = parse_multiplicative(p);
 
-        ast_expr_binary *binary = (ast_expr_binary *)alloc(*p.memory, sizeof(ast_expr_binary));
+        ast_expr_binary *binary = (ast_expr_binary *)p.allocator->alloc(sizeof(ast_expr_binary));
         if (!binary) return nullptr;
 
         binary->root = {.type = ast_node_type::EXPR_BINARY, .row = expr->row, .column = expr->column};
@@ -788,7 +788,7 @@ static ast_node *parse_multiplicative(parser &p) {
 
         ast_node *right = parse_unary(p);
 
-        ast_expr_binary *binary = (ast_expr_binary *)alloc(*p.memory, sizeof(ast_expr_binary));
+        ast_expr_binary *binary = (ast_expr_binary *)p.allocator->alloc(sizeof(ast_expr_binary));
         if (!binary) return nullptr;
 
         binary->root = {.type = ast_node_type::EXPR_BINARY, .row = expr->row, .column = expr->column};
@@ -818,7 +818,7 @@ static ast_node *parse_unary(parser &p) {
 
         ast_node *operand = parse_unary(p);
 
-        ast_expr_unary *unary = (ast_expr_unary *)alloc(*p.memory, sizeof(ast_expr_unary));
+        ast_expr_unary *unary = (ast_expr_unary *)p.allocator->alloc(sizeof(ast_expr_unary));
         if (!unary) return nullptr;
 
         unary->root = {.type = ast_node_type::EXPR_UNARY, .row = line, .column = col};
@@ -853,7 +853,7 @@ static ast_node *parse_postfix(parser &p) {
             u32 argument_capacity = 8;
 
             if (!parser_check(p, token_type::RIGHT_PAREN)) {
-                arguments = (ast_node **)alloc_array(*p.memory, sizeof(ast_node *), argument_capacity);
+                arguments = (ast_node **)p.allocator->alloc_array(sizeof(ast_node *), argument_capacity);
                 if (!arguments) {
                     parser_error(p, "Failed to allocate memory for arguments");
                     return nullptr;
@@ -882,7 +882,7 @@ static ast_node *parse_postfix(parser &p) {
             if (p.has_error) return nullptr;
 
             // Create procedure call node
-            ast_expr_call *call = (ast_expr_call *)alloc(*p.memory, sizeof(ast_expr_call));
+            ast_expr_call *call = (ast_expr_call *)p.allocator->alloc(sizeof(ast_expr_call));
             if (!call) {
                 parser_error(p, "Failed to allocate memory for procedure call");
                 return nullptr;
@@ -908,7 +908,7 @@ static ast_node *parse_primary(parser &p) {
         token tok = p.current_token;
         parser_advance(p);
 
-        ast_expr_literal *lit = (ast_expr_literal *)alloc(*p.memory, sizeof(ast_expr_literal));
+        ast_expr_literal *lit = (ast_expr_literal *)p.allocator->alloc(sizeof(ast_expr_literal));
         if (!lit) return nullptr;
 
         lit->root = {.type = ast_node_type::EXPR_LITERAL, .row = tok.row, .column = tok.column};
@@ -923,7 +923,7 @@ static ast_node *parse_primary(parser &p) {
         token tok = p.current_token;
         parser_advance(p);
 
-        ast_expr_literal *lit = (ast_expr_literal *)alloc(*p.memory, sizeof(ast_expr_literal));
+        ast_expr_literal *lit = (ast_expr_literal *)p.allocator->alloc(sizeof(ast_expr_literal));
         if (!lit) return nullptr;
 
         lit->root = {.type = ast_node_type::EXPR_LITERAL, .row = tok.row, .column = tok.column};
@@ -939,7 +939,7 @@ static ast_node *parse_primary(parser &p) {
         token tok = p.current_token;
         parser_advance(p);
 
-        ast_expr_literal *lit = (ast_expr_literal *)alloc(*p.memory, sizeof(ast_expr_literal));
+        ast_expr_literal *lit = (ast_expr_literal *)p.allocator->alloc(sizeof(ast_expr_literal));
         if (!lit) return nullptr;
 
         lit->root = {.type = ast_node_type::EXPR_LITERAL, .row = tok.row, .column = tok.column};
@@ -954,7 +954,7 @@ static ast_node *parse_primary(parser &p) {
         token tok = p.current_token;
         parser_advance(p);
 
-        ast_expr_identifier *ident = (ast_expr_identifier *)alloc(*p.memory, sizeof(ast_expr_identifier));
+        ast_expr_identifier *ident = (ast_expr_identifier *)p.allocator->alloc(sizeof(ast_expr_identifier));
         if (!ident) return nullptr;
 
         ident->root = {.type = ast_node_type::EXPR_IDENTIFIER, .row = tok.row, .column = tok.column};
@@ -997,7 +997,7 @@ static ast_node *parse_module_declaration(parser &p) {
     u32 declaration_count = 0;
     u32 declaration_capacity = 16;
 
-    declarations = (ast_node **)alloc_array(*p.memory, sizeof(ast_node *), declaration_capacity);
+    declarations = (ast_node **)p.allocator->alloc_array(sizeof(ast_node *), declaration_capacity);
     if (!declarations) {
         parser_error(p, "Failed to allocate memory for module declarations");
         return nullptr;
@@ -1015,7 +1015,7 @@ static ast_node *parse_module_declaration(parser &p) {
                 // Reallocate if needed
                 declaration_capacity *= 2;
                 ast_node **new_declarations =
-                    (ast_node **)alloc_array(*p.memory, sizeof(ast_node *), declaration_capacity);
+                    (ast_node **)p.allocator->alloc_array(sizeof(ast_node *), declaration_capacity);
                 if (!new_declarations) {
                     parser_error(p, "Failed to reallocate memory for module declarations");
                     break;
@@ -1038,11 +1038,11 @@ static ast_node *parse_module_declaration(parser &p) {
     if (p.has_error) return nullptr;
 
     // Create module declaration
-    ast_decl_module *module_decl = (ast_decl_module *)alloc(*p.memory, sizeof(ast_decl_module));
+    ast_decl_module *module_decl = (ast_decl_module *)p.allocator->alloc(sizeof(ast_decl_module));
     if (!module_decl) return nullptr;
 
     // Copy module name
-    char *name_copy = (char *)alloc(*p.memory, name_token.stride + 1);
+    char *name_copy = (char *)p.allocator->alloc(name_token.stride + 1);
     if (!name_copy) return nullptr;
     strncpy(name_copy, name_token.value, name_token.stride);
     name_copy[name_token.stride] = '\0';
@@ -1061,7 +1061,7 @@ static ast_node *parse_module_declaration(parser &p) {
 
 // Parse dotted path: a.one.two
 static const char **parse_dotted_path(parser &p, u32 *path_len) {
-    const char **path = (const char **)alloc_array(*p.memory, sizeof(const char *), 8);
+    const char **path = (const char **)p.allocator->alloc_array(sizeof(const char *), 8);
     if (!path) return nullptr;
 
     u32 count = 0;
@@ -1077,7 +1077,7 @@ static const char **parse_dotted_path(parser &p, u32 *path_len) {
         }
 
         // Copy the identifier
-        char *copied = (char *)alloc(*p.memory, ident.stride + 1);
+        char *copied = (char *)p.allocator->alloc(ident.stride + 1);
         if (!copied) return nullptr;
         strncpy(copied, ident.value, ident.stride);
         copied[ident.stride] = '\0';
@@ -1098,8 +1098,8 @@ static const char **parse_dotted_path(parser &p, u32 *path_len) {
 // Parse group items: {one, two, three}
 static bool parse_group_items(parser &p, ast_decl_use::use_item::group_item **items, u32 *item_count) {
     const u32 capacity = 16;
-    ast_decl_use::use_item::group_item *group_items = (ast_decl_use::use_item::group_item *)alloc_array(
-        *p.memory, sizeof(ast_decl_use::use_item::group_item), capacity);
+    ast_decl_use::use_item::group_item *group_items = (ast_decl_use::use_item::group_item *)p.allocator->alloc_array(
+        sizeof(ast_decl_use::use_item::group_item), capacity);
     if (!group_items) return false;
 
     u32 count = 0;
@@ -1114,7 +1114,7 @@ static bool parse_group_items(parser &p, ast_decl_use::use_item::group_item **it
         if (p.has_error) return false;
 
         // Copy identifier
-        char *name_copy = (char *)alloc(*p.memory, ident.stride + 1);
+        char *name_copy = (char *)p.allocator->alloc(ident.stride + 1);
         if (!name_copy) return false;
         strncpy(name_copy, ident.value, ident.stride);
         name_copy[ident.stride] = '\0';
@@ -1178,7 +1178,7 @@ static ast_node *parse_use_declaration(parser &p) {
     // Parse use items (comma-separated)
     const u32 capacity = 16;
     ast_decl_use::use_item *items =
-        (ast_decl_use::use_item *)alloc_array(*p.memory, sizeof(ast_decl_use::use_item), capacity);
+        (ast_decl_use::use_item *)p.allocator->alloc_array(sizeof(ast_decl_use::use_item), capacity);
     if (!items) {
         parser_error(p, "Failed to allocate memory for use items");
         return nullptr;
@@ -1209,7 +1209,7 @@ static ast_node *parse_use_declaration(parser &p) {
     parser_match(p, token_type::SEMICOLON);
 
     // Create use declaration
-    ast_decl_use *use_decl = (ast_decl_use *)alloc(*p.memory, sizeof(ast_decl_use));
+    ast_decl_use *use_decl = (ast_decl_use *)p.allocator->alloc(sizeof(ast_decl_use));
     if (!use_decl) return nullptr;
 
     use_decl->root = {.type = ast_node_type::DECL_USE, .row = line, .column = col};
@@ -1231,13 +1231,13 @@ static ast_node *parse_member_access(parser &p, ast_node *left) {
     if (p.has_error) return nullptr;
 
     // Copy member name
-    char *member_copy = (char *)alloc(*p.memory, member.stride + 1);
+    char *member_copy = (char *)p.allocator->alloc(member.stride + 1);
     if (!member_copy) return nullptr;
     strncpy(member_copy, member.value, member.stride);
     member_copy[member.stride] = '\0';
 
     // Create member access node
-    ast_expr_member_access *access = (ast_expr_member_access *)alloc(*p.memory, sizeof(ast_expr_member_access));
+    ast_expr_member_access *access = (ast_expr_member_access *)p.allocator->alloc(sizeof(ast_expr_member_access));
     if (!access) return nullptr;
 
     access->root = {.type = ast_node_type::EXPR_MEMBER_ACCESS, .row = line, .column = col};

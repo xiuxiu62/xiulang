@@ -2,14 +2,18 @@
 #include "allocators.hpp"
 #include "ast.hpp"
 #include "collections.hpp"
+// #include "collections/pool.cpp"
 #include <cstring>
+
+// template struct pool<use_info>;
+// template struct pool<module_info>;
 
 static const char **create_full_path(arena_allocator &allocator, const char **parent_path, u32 parent_depth,
                                      const char *name, u32 name_len);
 static bool paths_equal(const char **path1, u32 path1_len, const char **path2, u32 path2_len);
 static bool string_equals(const char *str1, u32 len1, const char *str2, u32 len2);
 
-bool module_registry_init(module_registry &registry, block_allocator &allocator) {
+bool module_registry_init(module_registry &registry, arena_allocator &allocator) {
     registry.allocator = &allocator;
     return registry.modules.init(allocator, 32);
 }
